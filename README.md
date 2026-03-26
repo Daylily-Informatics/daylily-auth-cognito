@@ -186,7 +186,47 @@ daycog add-user user@example.com --password Secure1234
 daycog set-password --email user@example.com --password NewPass123
 daycog delete-user --email user@example.com --force
 daycog delete-all-users --force
+daycog export --output cognito_users.json
+
+# Maintenance helpers
+daycog fix-auth-flows
+daycog setup-google --client-id YOUR_ID --client-secret YOUR_SECRET
+
+# Legacy compatibility helper (prefer delete-pool)
+daycog teardown --force
 ```
+
+### Command Status
+
+Primary operational commands:
+- `status`
+- `setup`
+- `config print`
+- `config create`
+- `config update`
+- `config create-all`
+- `list-pools`
+- `list-apps`
+- `add-app`
+- `edit-app`
+- `remove-app`
+- `add-google-idp`
+- `setup-with-google`
+- `delete-pool`
+
+Supported maintenance commands:
+- `fix-auth-flows`
+- `list-users`
+- `add-user`
+- `set-password`
+- `delete-user`
+- `delete-all-users`
+- `export`
+- `setup-google`
+
+Legacy compatibility command:
+- `teardown`
+  Prefer `delete-pool`. `teardown` is retained for older env-driven workflows that only know the active pool context.
 
 ### `setup` Behavior
 
@@ -197,8 +237,8 @@ daycog delete-all-users --force
 If either value is missing, setup exits with an error.
 
 On success, setup writes/updates:
-- `~/.config/daycog/<pool-name>.<region>.env`
-- `~/.config/daycog/<pool-name>.<region>.<app-name>.env`
+- `~/.config/daycog/<pool-id>.<region>.env`
+- `~/.config/daycog/<pool-id>.<region>.<app-name>.env`
 - `~/.config/daycog/default.env`
 
 with:
@@ -236,9 +276,9 @@ Additional setup options:
 ### Multi-App Env Files
 
 For a single pool with multiple app clients, daycog now stores:
-- Pool file: `~/.config/daycog/<pool>.<region>.env`
+- Pool file: `~/.config/daycog/<pool-id>.<region>.env`
   - Last selected app context for that pool/region.
-- App file: `~/.config/daycog/<pool>.<region>.<app>.env`
+- App file: `~/.config/daycog/<pool-id>.<region>.<app>.env`
   - App-specific client settings (`COGNITO_APP_CLIENT_ID`, callback/logout, etc.).
 - Global default: `~/.config/daycog/default.env`
   - Active/default context loaded by `daycog_activate`.
@@ -247,6 +287,7 @@ For a single pool with multiple app clients, daycog now stores:
 `daycog add-app` / `daycog edit-app` always write the app file, and update pool/default when `--set-default` is passed.
 `daycog remove-app` deletes the app in Cognito and, by default, removes the app file.
 `daycog delete-pool` removes matching pool/app config files; it also removes `default.env` when it points at the deleted pool.
+If legacy `<pool-name>.<region>*` files exist, daycog migrates them to the canonical pool-ID keyed files when those targets are touched.
 If setup-target config files already exist, `daycog setup` prints warnings and updates them in place.
 
 ### Config File Commands
@@ -257,12 +298,17 @@ daycog config print
 
 # Print specific pool config path and contents
 daycog config print --pool-name my-pool --region us-east-1
+daycog config print --pool-id us-east-1_abc123 --region us-east-1
 
 # Create pool/app config from AWS and update default config
-daycog config create --pool-name my-pool --profile my-aws-profile --region us-east-1
+daycog config create --pool-name my-pool --client-name web-app --profile my-aws-profile --region us-east-1
+daycog config create --pool-id us-east-1_abc123 --client-id 4h57... --profile my-aws-profile --region us-east-1
 
 # Update pool/app config from AWS and update default config
-daycog config update --pool-name my-pool --profile my-aws-profile --region us-east-1
+daycog config update --pool-name my-pool --client-name web-app --profile my-aws-profile --region us-east-1
+
+# Bootstrap one app file per client in a pool
+daycog config create-all --pool-name my-pool --default-client atlas --profile my-aws-profile --region us-east-1
 ```
 
 ### Multi-Config CLI Usage
@@ -283,9 +329,23 @@ daycog --config DEV list-users
 ```
 
 Note: `daycog config create/update` use AWS lookups with `--profile`/`--region` (or `AWS_*`) and are separate from `--config NAME`.
-If a pool has app clients, `config create/update` sync the selected app into pool/default config and write `~/.config/daycog/<pool>.<region>.<app>.env`.
-If a pool has multiple app clients, `config create/update` use the first client returned by AWS.
-When using `config print --pool-name`, `--region` is required to resolve the region-scoped file name.
+If a pool has app clients, `config create/update` sync the selected app into pool/default config and write `~/.config/daycog/<pool-id>.<region>.<app>.env`.
+If a pool has multiple app clients, `config create/update` require `--client-name` or `--client-id`; otherwise they fail and recommend `config create-all`.
+`config create/update` accept `--callback-url` / `--logout-url` to override the values written to env files without mutating Cognito.
+`config create-all` creates missing app-scoped files for every client in the pool; it only writes the pool file and `default.env` when `--default-client` is supplied.
+When using `config print --pool-name` or `--pool-id`, `--region` is required to resolve the region-scoped file name.
+
+### Maintenance Commands
+
+`daycog fix-auth-flows` is a repair command for older clients missing `ALLOW_ADMIN_USER_PASSWORD_AUTH`.
+
+`daycog export` writes the current pool's users to JSON for inspection or migration work:
+
+```bash
+daycog export --output cognito_users.json
+```
+
+`daycog setup-google` prints Google OAuth environment variables and the redirect URI to register. It does not update Cognito resources, so prefer `add-google-idp` or `setup-with-google` when you need operational changes.
 
 ## FastAPI Integration
 
