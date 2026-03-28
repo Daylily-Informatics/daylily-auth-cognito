@@ -199,12 +199,8 @@ class TestSetupCommand:
         mc.create_user_pool_client.assert_called_once()
         assert _pool_file(tmp_path, "us-west-2_New", "us-west-2").exists()
         assert _app_file(tmp_path, "us-west-2_New", "us-west-2", "my-pool-client").exists()
-        assert _get_active_context_name(tmp_path) == _app_context_name(
-            "us-west-2_New", "us-west-2", "my-pool-client"
-        )
-        content = _app_file(tmp_path, "us-west-2_New", "us-west-2", "my-pool-client").read_text(
-            encoding="utf-8"
-        )
+        assert _get_active_context_name(tmp_path) == _app_context_name("us-west-2_New", "us-west-2", "my-pool-client")
+        content = _app_file(tmp_path, "us-west-2_New", "us-west-2", "my-pool-client").read_text(encoding="utf-8")
         assert "COGNITO_CALLBACK_URL=http://localhost:8001/auth/callback" in content
         assert "COGNITO_DOMAIN=my-pool.auth.us-west-2.amazoncognito.com" in content
 
@@ -465,7 +461,9 @@ class TestConfigCommand:
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
         cfg_path.write_text("COGNITO_USER_POOL_ID=us-west-2_pool\n", encoding="utf-8")
         with mock.patch("pathlib.Path.home", return_value=tmp_path):
-            result = runner.invoke(cognito_app, ["config", "print", "--pool-id", "us-west-2_pool", "--region", "us-west-2"])
+            result = runner.invoke(
+                cognito_app, ["config", "print", "--pool-id", "us-west-2_pool", "--region", "us-west-2"]
+            )
         assert result.exit_code == 0
         assert "COGNITO_USER_POOL_ID=us-west-2_pool" in result.output
 
@@ -509,7 +507,9 @@ class TestConfigCommand:
         mock_paginator = mock.MagicMock()
         mock_paginator.paginate.return_value = [{"UserPools": [{"Name": "my-pool", "Id": "us-east-1_pool"}]}]
         mc.get_paginator.return_value = mock_paginator
-        mc.list_user_pool_clients.return_value = {"UserPoolClients": [{"ClientId": "client_123", "ClientName": "web-app"}]}
+        mc.list_user_pool_clients.return_value = {
+            "UserPoolClients": [{"ClientId": "client_123", "ClientName": "web-app"}]
+        }
         mc.describe_user_pool_client.return_value = {
             "UserPoolClient": {
                 "ClientName": "web-app",
@@ -861,9 +861,7 @@ class TestConfigCommand:
         mock_paginator = mock.MagicMock()
         mock_paginator.paginate.return_value = [{"UserPools": [{"Name": "my-pool", "Id": "us-east-1_pool"}]}]
         mc.get_paginator.return_value = mock_paginator
-        mc.list_user_pool_clients.return_value = {
-            "UserPoolClients": [{"ClientId": "atlas_id", "ClientName": "atlas"}]
-        }
+        mc.list_user_pool_clients.return_value = {"UserPoolClients": [{"ClientId": "atlas_id", "ClientName": "atlas"}]}
         mc.describe_user_pool_client.return_value = {
             "UserPoolClient": {
                 "ClientName": "atlas",
@@ -1204,7 +1202,9 @@ class TestSetupWithGoogleCommand:
         mock_paginator = mock.MagicMock()
         mock_paginator.paginate.return_value = [{"UserPools": [{"Name": "pool-a", "Id": "us-east-1_NEWPOOL"}]}]
         mc_session.get_paginator.return_value = mock_paginator
-        mc_session.list_user_pool_clients.return_value = {"UserPoolClients": [{"ClientName": "web-app", "ClientId": "cid-new"}]}
+        mc_session.list_user_pool_clients.return_value = {
+            "UserPoolClients": [{"ClientName": "web-app", "ClientId": "cid-new"}]
+        }
         mc_session.describe_identity_provider.side_effect = Exception("not found")
         mc_session.describe_user_pool_client.return_value = {
             "UserPoolClient": {

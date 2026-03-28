@@ -94,16 +94,12 @@ def _context_targets(
 ) -> tuple[str, List[str]]:
     """Return canonical context name and alternate variants for a pool or app context."""
     primary_name = (
-        _app_context_name(pool_id, region, client_name)
-        if client_name
-        else _pool_context_name(pool_id, region)
+        _app_context_name(pool_id, region, client_name) if client_name else _pool_context_name(pool_id, region)
     )
     legacy_names: List[str] = []
     if pool_name and pool_name != pool_id:
         legacy_names.append(
-            _app_context_name(pool_name, region, client_name)
-            if client_name
-            else _pool_context_name(pool_name, region)
+            _app_context_name(pool_name, region, client_name) if client_name else _pool_context_name(pool_name, region)
         )
     return primary_name, legacy_names
 
@@ -301,9 +297,7 @@ def _resolve_pool(cognito: Any, pool_name: Optional[str] = None, pool_id: Option
         pool_info = cognito.describe_user_pool(UserPoolId=pool_id)["UserPool"]
         resolved_pool_name = pool_info["Name"]
         if pool_name and pool_name != resolved_pool_name:
-            console.print(
-                f"[red]✗[/red]  Pool name '{pool_name}' does not match resolved pool '{resolved_pool_name}'"
-            )
+            console.print(f"[red]✗[/red]  Pool name '{pool_name}' does not match resolved pool '{resolved_pool_name}'")
             raise typer.Exit(1)
         return {"pool_id": pool_id, "pool_name": resolved_pool_name, "pool_info": pool_info}
 
@@ -336,7 +330,9 @@ def _list_pool_clients(cognito: Any, pool_id: str) -> List[Dict[str, str]]:
     return cognito.list_user_pool_clients(UserPoolId=pool_id, MaxResults=60).get("UserPoolClients", [])
 
 
-def _find_client(cognito: Any, pool_id: str, client_name: Optional[str] = None, client_id: Optional[str] = None) -> Dict[str, str]:
+def _find_client(
+    cognito: Any, pool_id: str, client_name: Optional[str] = None, client_id: Optional[str] = None
+) -> Dict[str, str]:
     """Find an app client by name or id in a pool."""
     clients = _list_pool_clients(cognito, pool_id)
     match = None
@@ -487,9 +483,7 @@ def _print_context(name: str) -> None:
         console.print("\n".join(lines))
 
 
-def _resolve_pool_print_context_name(
-    pool_name: str, region: str, profile: Optional[str] = None
-) -> str:
+def _resolve_pool_print_context_name(pool_name: str, region: str, profile: Optional[str] = None) -> str:
     """Resolve the most appropriate pool context name when given a pool name."""
     legacy_name = _pool_context_name(pool_name, region)
     resolved_profile = profile or os.environ.get("AWS_PROFILE")
@@ -661,7 +655,9 @@ def status() -> None:
 @cognito_app.command("setup")
 def setup(
     pool_name: str = typer.Option("ursa-users", "--name", "-n", help="User pool name"),
-    client_name: Optional[str] = typer.Option(None, "--client-name", help="App client name (default: <pool-name>-client)"),
+    client_name: Optional[str] = typer.Option(
+        None, "--client-name", help="App client name (default: <pool-name>-client)"
+    ),
     domain_prefix: Optional[str] = typer.Option(
         None, "--domain-prefix", help="Hosted UI domain prefix (default: pool name)"
     ),
@@ -703,8 +699,12 @@ def setup(
     scopes: str = typer.Option("openid,email,profile", "--scopes", help="Comma-separated OAuth scopes"),
     idps: str = typer.Option("COGNITO", "--idp", help="Comma-separated identity providers"),
     password_min_length: int = typer.Option(8, "--password-min-length", help="Minimum password length"),
-    require_uppercase: bool = typer.Option(True, "--require-uppercase/--no-require-uppercase", help="Require uppercase"),
-    require_lowercase: bool = typer.Option(True, "--require-lowercase/--no-require-lowercase", help="Require lowercase"),
+    require_uppercase: bool = typer.Option(
+        True, "--require-uppercase/--no-require-uppercase", help="Require uppercase"
+    ),
+    require_lowercase: bool = typer.Option(
+        True, "--require-lowercase/--no-require-lowercase", help="Require lowercase"
+    ),
     require_numbers: bool = typer.Option(True, "--require-numbers/--no-require-numbers", help="Require numbers"),
     require_symbols: bool = typer.Option(False, "--require-symbols/--no-require-symbols", help="Require symbols"),
     mfa: str = typer.Option("off", "--mfa", help="MFA mode: off, optional, required"),
@@ -838,13 +838,11 @@ def setup(
         )
         if _existing_context_names(pool_context_name, pool_legacy_names):
             console.print(
-                f"[yellow]⚠[/yellow]  Context already exists in {_config_store_path()}, updating: "
-                f"{pool_context_name}"
+                f"[yellow]⚠[/yellow]  Context already exists in {_config_store_path()}, updating: {pool_context_name}"
             )
         if _existing_context_names(app_context_name, app_legacy_names):
             console.print(
-                f"[yellow]⚠[/yellow]  Context already exists in {_config_store_path()}, updating: "
-                f"{app_context_name}"
+                f"[yellow]⚠[/yellow]  Context already exists in {_config_store_path()}, updating: {app_context_name}"
             )
 
         _write_context(pool_context_name, setup_values, legacy_names=pool_legacy_names)
@@ -1227,7 +1225,9 @@ def add_app(
     oauth_flows: str = typer.Option("code", "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: str = typer.Option("openid,email,profile", "--scopes", help="Comma-separated OAuth scopes"),
     idps: str = typer.Option("COGNITO", "--idp", help="Comma-separated identity providers"),
-    set_default: bool = typer.Option(False, "--set-default", help="Also update the pool context and active Daycog context to this app"),
+    set_default: bool = typer.Option(
+        False, "--set-default", help="Also update the pool context and active Daycog context to this app"
+    ),
 ) -> None:
     """Add a new app client to an existing pool."""
     resolved_profile, resolved_region = _resolve_profile_region(profile, region)
@@ -1319,7 +1319,9 @@ def edit_app(
     oauth_flows: Optional[str] = typer.Option(None, "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: Optional[str] = typer.Option(None, "--scopes", help="Comma-separated OAuth scopes"),
     idps: Optional[str] = typer.Option(None, "--idp", help="Comma-separated identity providers"),
-    set_default: bool = typer.Option(False, "--set-default", help="Also update the pool context and active Daycog context to this app"),
+    set_default: bool = typer.Option(
+        False, "--set-default", help="Also update the pool context and active Daycog context to this app"
+    ),
 ) -> None:
     """Edit an existing app client in a pool."""
     if not app_name and not client_id:
@@ -1410,7 +1412,9 @@ def remove_app(
     profile: Optional[str] = typer.Option(None, "--profile", help="AWS profile to use"),
     region: Optional[str] = typer.Option(None, "--region", help="AWS region to use"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-    delete_config: bool = typer.Option(True, "--delete-config/--keep-config", help="Delete the app-scoped Daycog context"),
+    delete_config: bool = typer.Option(
+        True, "--delete-config/--keep-config", help="Delete the app-scoped Daycog context"
+    ),
 ) -> None:
     """Remove an app client from a pool."""
     if not app_name and not client_id:
@@ -1537,7 +1541,9 @@ def add_google_idp(
         )
         update_kwargs["SupportedIdentityProviders"] = supported
         cognito.update_user_pool_client(**update_kwargs)
-        console.print(f"[green]✓[/green]  Enabled Google provider on app client: {app['client_name']} ({app['client_id']})")
+        console.print(
+            f"[green]✓[/green]  Enabled Google provider on app client: {app['client_name']} ({app['client_id']})"
+        )
 
     except Exception as e:
         console.print(f"[red]✗[/red]  Error: {e}")
@@ -1547,7 +1553,9 @@ def add_google_idp(
 @cognito_app.command("setup-with-google")
 def setup_with_google(
     pool_name: str = typer.Option("ursa-users", "--name", "-n", help="User pool name"),
-    client_name: Optional[str] = typer.Option(None, "--client-name", help="App client name (default: <pool-name>-client)"),
+    client_name: Optional[str] = typer.Option(
+        None, "--client-name", help="App client name (default: <pool-name>-client)"
+    ),
     domain_prefix: Optional[str] = typer.Option(
         None, "--domain-prefix", help="Hosted UI domain prefix (default: pool name)"
     ),
@@ -1560,7 +1568,9 @@ def setup_with_google(
     ),
     callback_url: Optional[str] = typer.Option(None, "--callback-url", help="Full callback URL override"),
     logout_url: Optional[str] = typer.Option(None, "--logout-url", help="Optional logout URL for app client"),
-    profile: Optional[str] = typer.Option(None, "--profile", help="AWS profile to use (defaults to AWS_PROFILE env var)"),
+    profile: Optional[str] = typer.Option(
+        None, "--profile", help="AWS profile to use (defaults to AWS_PROFILE env var)"
+    ),
     region: Optional[str] = typer.Option(None, "--region", help="AWS region to use (defaults to AWS_REGION env var)"),
     print_exports: bool = typer.Option(
         False, "--print-exports", help="Print export commands so callers can eval them in the parent shell"
@@ -1573,8 +1583,12 @@ def setup_with_google(
     scopes: str = typer.Option("openid,email,profile", "--scopes", help="Comma-separated OAuth scopes"),
     idps: str = typer.Option("COGNITO", "--idp", help="Comma-separated identity providers"),
     password_min_length: int = typer.Option(8, "--password-min-length", help="Minimum password length"),
-    require_uppercase: bool = typer.Option(True, "--require-uppercase/--no-require-uppercase", help="Require uppercase"),
-    require_lowercase: bool = typer.Option(True, "--require-lowercase/--no-require-lowercase", help="Require lowercase"),
+    require_uppercase: bool = typer.Option(
+        True, "--require-uppercase/--no-require-uppercase", help="Require uppercase"
+    ),
+    require_lowercase: bool = typer.Option(
+        True, "--require-lowercase/--no-require-lowercase", help="Require lowercase"
+    ),
     require_numbers: bool = typer.Option(True, "--require-numbers/--no-require-numbers", help="Require numbers"),
     require_symbols: bool = typer.Option(False, "--require-symbols/--no-require-symbols", help="Require symbols"),
     mfa: str = typer.Option("off", "--mfa", help="MFA mode: off, optional, required"),

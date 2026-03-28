@@ -273,6 +273,7 @@ class TestDeleteAppClient:
         mock_client.delete_user_pool_client.side_effect = _make_client_error("ResourceNotFoundException")
         assert auth.delete_app_client(client_id="current-cid") is False
 
+
 # ---------------------------------------------------------------------------
 # create_customer_user
 # ---------------------------------------------------------------------------
