@@ -1500,6 +1500,116 @@ class TestSetPasswordCommand:
 
 
 # ---------------------------------------------------------------------------
+# ensure-group
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureGroupCommand:
+    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch("boto3.client")
+    def test_ensure_group_creates_missing_group(self, mock_boto_client: mock.MagicMock) -> None:
+        mc = _mock_cognito_client()
+        paginator = mock.MagicMock()
+        paginator.paginate.return_value = [{"Groups": []}]
+        mc.get_paginator.return_value = paginator
+        mock_boto_client.return_value = mc
+
+        result = runner.invoke(cognito_app, ["ensure-group", "lsmc-admins", "--description", "Admins"])
+
+        assert result.exit_code == 0
+        mc.create_group.assert_called_once_with(
+            UserPoolId="us-west-2_TestPool",
+            GroupName="lsmc-admins",
+            Description="Admins",
+        )
+        assert "Created group" in result.output
+
+    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch("boto3.client")
+    def test_ensure_group_noops_when_group_exists(self, mock_boto_client: mock.MagicMock) -> None:
+        mc = _mock_cognito_client()
+        paginator = mock.MagicMock()
+        paginator.paginate.return_value = [{"Groups": [{"GroupName": "lsmc-admins"}]}]
+        mc.get_paginator.return_value = paginator
+        mock_boto_client.return_value = mc
+
+        result = runner.invoke(cognito_app, ["ensure-group", "lsmc-admins"])
+
+        assert result.exit_code == 0
+        mc.create_group.assert_not_called()
+        assert "already exists" in result.output
+
+
+# ---------------------------------------------------------------------------
+# add-user-to-group
+# ---------------------------------------------------------------------------
+
+
+class TestAddUserToGroupCommand:
+    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch("boto3.client")
+    def test_add_user_to_group_calls_admin_api(self, mock_boto_client: mock.MagicMock) -> None:
+        mc = _mock_cognito_client()
+        mock_boto_client.return_value = mc
+
+        result = runner.invoke(
+            cognito_app,
+            ["add-user-to-group", "--email", "new@example.com", "--group", "lsmc-admins"],
+        )
+
+        assert result.exit_code == 0
+        mc.admin_add_user_to_group.assert_called_once_with(
+            UserPoolId="us-west-2_TestPool",
+            Username="new@example.com",
+            GroupName="lsmc-admins",
+        )
+        assert "Added new@example.com" in result.output
+
+
+# ---------------------------------------------------------------------------
+# set-user-attributes
+# ---------------------------------------------------------------------------
+
+
+class TestSetUserAttributesCommand:
+    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch("boto3.client")
+    def test_set_user_attributes_updates_attributes(self, mock_boto_client: mock.MagicMock) -> None:
+        mc = _mock_cognito_client()
+        mock_boto_client.return_value = mc
+
+        result = runner.invoke(
+            cognito_app,
+            [
+                "set-user-attributes",
+                "--email",
+                "new@example.com",
+                "--attribute",
+                "custom:tenant_id=00000000-0000-0000-0000-000000000001",
+                "--attribute",
+                "custom:roles=ADMIN,INTERNAL_USER",
+            ],
+        )
+
+        assert result.exit_code == 0
+        mc.admin_update_user_attributes.assert_called_once_with(
+            UserPoolId="us-west-2_TestPool",
+            Username="new@example.com",
+            UserAttributes=[
+                {"Name": "custom:tenant_id", "Value": "00000000-0000-0000-0000-000000000001"},
+                {"Name": "custom:roles", "Value": "ADMIN,INTERNAL_USER"},
+            ],
+        )
+        assert "Updated attributes" in result.output
+
+    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    def test_set_user_attributes_requires_attribute(self) -> None:
+        result = runner.invoke(cognito_app, ["set-user-attributes", "--email", "new@example.com"])
+        assert result.exit_code != 0
+        assert "Provide at least one --attribute" in result.output
+
+
+# ---------------------------------------------------------------------------
 # add-user
 # ---------------------------------------------------------------------------
 

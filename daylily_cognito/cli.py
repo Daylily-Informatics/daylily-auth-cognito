@@ -683,6 +683,32 @@ def _get_cognito_region() -> str:
     return os.environ.get("COGNITO_REGION") or os.environ.get("AWS_REGION") or "us-west-2"
 
 
+def _get_cognito_client() -> Any:
+    """Return a Cognito IDP client for the configured region."""
+    import boto3
+
+    return boto3.client("cognito-idp", region_name=_get_cognito_region())
+
+
+def _parse_attributes(values: List[str]) -> List[Dict[str, str]]:
+    """Parse repeated Name=Value attribute assignments."""
+    attributes: List[Dict[str, str]] = []
+    for raw in values:
+        item = str(raw or "").strip()
+        if not item:
+            continue
+        if "=" not in item:
+            console.print(f"[red]✗[/red]  Invalid attribute format: {item}. Use Name=Value")
+            raise typer.Exit(1)
+        name, value = item.split("=", 1)
+        name = name.strip()
+        if not name:
+            console.print(f"[red]✗[/red]  Invalid empty attribute name in: {item}")
+            raise typer.Exit(1)
+        attributes.append({"Name": name, "Value": value})
+    return attributes
+
+
 @cognito_app.command("status")
 def status() -> None:
     """Check Cognito configuration status."""
@@ -1871,10 +1897,7 @@ def set_password(
     pool_id = _get_pool_id()
 
     try:
-        import boto3
-
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
+        cognito = _get_cognito_client()
         cognito.admin_set_user_password(
             UserPoolId=pool_id,
             Username=email,
@@ -1884,6 +1907,89 @@ def set_password(
 
         console.print(f"[green]✓[/green]  Password set for: {email}")
 
+    except Exception as e:
+        console.print(f"[red]✗[/red]  Error: {e}")
+        raise typer.Exit(1)
+
+
+@cognito_app.command("ensure-group")
+def ensure_group(
+    group_name: str = typer.Argument(..., help="Group name"),
+    description: str = typer.Option("", "--description", help="Optional group description"),
+):
+    """Ensure a Cognito group exists in the configured pool."""
+    _check_aws_profile()
+    pool_id = _get_pool_id()
+
+    try:
+        cognito = _get_cognito_client()
+        paginator = cognito.get_paginator("list_groups")
+        for page in paginator.paginate(UserPoolId=pool_id):
+            for group in page.get("Groups", []):
+                if group.get("GroupName") == group_name:
+                    console.print(f"[green]✓[/green]  Group already exists: {group_name}")
+                    return
+
+        params: Dict[str, Any] = {"UserPoolId": pool_id, "GroupName": group_name}
+        if description.strip():
+            params["Description"] = description.strip()
+        cognito.create_group(**params)
+        console.print(f"[green]✓[/green]  Created group: {group_name}")
+    except Exception as e:
+        console.print(f"[red]✗[/red]  Error: {e}")
+        raise typer.Exit(1)
+
+
+@cognito_app.command("add-user-to-group")
+def add_user_to_group(
+    email: str = typer.Option(..., "--email", help="User email address"),
+    group_name: str = typer.Option(..., "--group", help="Target Cognito group"),
+):
+    """Add a user to a Cognito group."""
+    _check_aws_profile()
+    pool_id = _get_pool_id()
+
+    try:
+        cognito = _get_cognito_client()
+        cognito.admin_add_user_to_group(
+            UserPoolId=pool_id,
+            Username=email,
+            GroupName=group_name,
+        )
+        console.print(f"[green]✓[/green]  Added {email} to group: {group_name}")
+    except Exception as e:
+        console.print(f"[red]✗[/red]  Error: {e}")
+        raise typer.Exit(1)
+
+
+@cognito_app.command("set-user-attributes")
+def set_user_attributes(
+    email: str = typer.Option(..., "--email", help="User email address"),
+    attribute: List[str] = typer.Option(
+        [],
+        "--attribute",
+        "-a",
+        help="Attribute assignment in Name=Value form. Repeat for multiple attributes.",
+    ),
+):
+    """Update Cognito user attributes such as custom:tenant_id or custom:roles."""
+    _check_aws_profile()
+    pool_id = _get_pool_id()
+    attributes = _parse_attributes(attribute)
+    if not attributes:
+        console.print("[red]✗[/red]  Provide at least one --attribute Name=Value pair")
+        raise typer.Exit(1)
+
+    try:
+        cognito = _get_cognito_client()
+        cognito.admin_update_user_attributes(
+            UserPoolId=pool_id,
+            Username=email,
+            UserAttributes=attributes,
+        )
+        console.print(f"[green]✓[/green]  Updated attributes for: {email}")
+        for entry in attributes:
+            console.print(f"   {entry['Name']}={entry['Value']}")
     except Exception as e:
         console.print(f"[red]✗[/red]  Error: {e}")
         raise typer.Exit(1)
@@ -1989,10 +2095,7 @@ def add_user(
     pool_id = _get_pool_id()
 
     try:
-        import boto3
-
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
+        cognito = _get_cognito_client()
 
         # Generate password if not provided
         temp_password = password or _generate_temp_password()
@@ -2048,10 +2151,7 @@ def list_users(
     pool_id = _get_pool_id()
 
     try:
-        import boto3
-
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
+        cognito = _get_cognito_client()
 
         table = Table(title=f"Cognito Users ({pool_id})")
         table.add_column("Email", style="cyan")

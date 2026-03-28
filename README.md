@@ -184,6 +184,11 @@ daycog delete-pool --pool-name my-pool --profile my-aws-profile --region us-east
 daycog list-users
 daycog add-user user@example.com --password Secure1234
 daycog set-password --email user@example.com --password NewPass123
+daycog ensure-group lsmc-admins --description "Atlas admin group"
+daycog add-user-to-group --email user@example.com --group lsmc-admins
+daycog set-user-attributes --email user@example.com \
+  --attribute custom:tenant_id=00000000-0000-0000-0000-000000000001 \
+  --attribute custom:roles=ADMIN,INTERNAL_USER
 daycog delete-user --email user@example.com --force
 daycog delete-all-users --force
 daycog export --output cognito_users.json
@@ -218,6 +223,9 @@ Supported maintenance commands:
 - `fix-auth-flows`
 - `list-users`
 - `add-user`
+- `ensure-group`
+- `add-user-to-group`
+- `set-user-attributes`
 - `set-password`
 - `delete-user`
 - `delete-all-users`
@@ -288,6 +296,20 @@ For a single pool with multiple app clients, Daycog stores:
 `daycog remove-app` deletes the app in Cognito and, by default, removes the app context.
 `daycog delete-pool` removes matching pool/app contexts and clears the active context when it points at the deleted pool.
 If setup-target contexts already exist, `daycog setup` prints warnings and updates them in place.
+
+## Ownership Boundary
+
+`daycog` is the operational owner for shared Cognito lifecycle:
+
+- user pool creation and updates
+- app client creation and callback/logout management
+- user creation
+- password resets and permanent password assignment
+- group creation and membership
+- user attribute updates such as `custom:tenant_id` and `custom:roles`
+
+Service CLIs should treat `daycog` as the lower-level auth tool instead of
+re-implementing Cognito lifecycle operations locally.
 
 ### Config File Commands
 
