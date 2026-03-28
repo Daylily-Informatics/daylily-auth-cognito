@@ -191,12 +191,23 @@ class TestUpdateAppClientAuthFlows:
                 "ClientName": "test-client",
                 "ReadAttributes": ["email"],
                 "WriteAttributes": ["email"],
+                "ExplicitAuthFlows": ["ALLOW_USER_SRP_AUTH"],
+                "LogoutURLs": ["http://localhost:8000/logout"],
+                "DefaultRedirectURI": "http://localhost:8000/callback",
+                "AllowedOAuthFlows": ["code"],
+                "AllowedOAuthScopes": ["openid"],
+                "AllowedOAuthFlowsUserPoolClient": True,
+                "PreventUserExistenceErrors": "ENABLED",
             }
         }
         auth.update_app_client_auth_flows()
         mock_client.update_user_pool_client.assert_called_once()
         call_kwargs = mock_client.update_user_pool_client.call_args[1]
         assert "ALLOW_ADMIN_USER_PASSWORD_AUTH" in call_kwargs["ExplicitAuthFlows"]
+        assert "ALLOW_USER_SRP_AUTH" in call_kwargs["ExplicitAuthFlows"]
+        assert call_kwargs["LogoutURLs"] == ["http://localhost:8000/logout"]
+        assert call_kwargs["DefaultRedirectURI"] == "http://localhost:8000/callback"
+        assert call_kwargs["PreventUserExistenceErrors"] == "ENABLED"
 
 
 # ---------------------------------------------------------------------------

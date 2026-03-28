@@ -17,6 +17,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from ._app_client_update import (
+    REQUIRED_AUTH_FLOWS,
+    build_user_pool_client_update_request,
+    merge_unique_strings,
+)
 from .config import (
     CognitoConfig,
     delete_context,
@@ -1330,30 +1335,31 @@ def edit_app(
         pool_id = _find_pool_id_by_name(cognito, pool_name)
         found = _find_client(cognito, pool_id, client_name=app_name, client_id=client_id)
 
-        details = cognito.describe_user_pool_client(UserPoolId=pool_id, ClientId=found["client_id"])["UserPoolClient"]
+        overrides = {
+            "ClientName": new_app_name or found["client_name"],
+        }
+        if callback_url:
+            overrides["CallbackURLs"] = [callback_url]
+        if logout_url:
+            overrides["LogoutURLs"] = [logout_url]
+        if oauth_flows:
+            overrides["AllowedOAuthFlows"] = _parse_csv(oauth_flows)
+        if scopes:
+            overrides["AllowedOAuthScopes"] = _parse_csv(scopes)
+        if idps:
+            overrides["SupportedIdentityProviders"] = _parse_csv(idps)
 
-        final_name = new_app_name or found["client_name"]
-        final_callback_urls = [callback_url] if callback_url else details.get("CallbackURLs", [])
-        final_logout_urls = [logout_url] if logout_url else details.get("LogoutURLs", [])
-        final_flows = _parse_csv(oauth_flows) if oauth_flows else details.get("AllowedOAuthFlows", [])
-        final_scopes = _parse_csv(scopes) if scopes else details.get("AllowedOAuthScopes", [])
-        final_idps = _parse_csv(idps) if idps else details.get("SupportedIdentityProviders", ["COGNITO"])
-
-        cognito.update_user_pool_client(
-            UserPoolId=pool_id,
-            ClientId=found["client_id"],
-            ClientName=final_name,
-            ExplicitAuthFlows=details.get(
-                "ExplicitAuthFlows",
-                ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_ADMIN_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"],
-            ),
-            AllowedOAuthFlows=final_flows,
-            AllowedOAuthScopes=final_scopes,
-            AllowedOAuthFlowsUserPoolClient=details.get("AllowedOAuthFlowsUserPoolClient", False),
-            CallbackURLs=final_callback_urls,
-            LogoutURLs=final_logout_urls,
-            SupportedIdentityProviders=final_idps,
+        update_kwargs = build_user_pool_client_update_request(
+            cognito,
+            user_pool_id=pool_id,
+            client_id=found["client_id"],
+            overrides=overrides,
         )
+        cognito.update_user_pool_client(**update_kwargs)
+
+        final_name = str(update_kwargs["ClientName"])
+        final_callback_urls = list(update_kwargs.get("CallbackURLs", []))
+        final_logout_urls = list(update_kwargs.get("LogoutURLs", []))
 
         app_values = {
             "AWS_PROFILE": resolved_profile,
@@ -1519,26 +1525,18 @@ def add_google_idp(
             console.print("[green]✓[/green]  Created Google identity provider")
 
         # Ensure app client allows Google provider
-        client_cfg = cognito.describe_user_pool_client(UserPoolId=pool_id, ClientId=app["client_id"])["UserPoolClient"]
-        supported = client_cfg.get("SupportedIdentityProviders", ["COGNITO"])
-        if "Google" not in supported:
-            supported = supported + ["Google"]
-
-        cognito.update_user_pool_client(
-            UserPoolId=pool_id,
-            ClientId=app["client_id"],
-            ClientName=client_cfg.get("ClientName", app["client_name"]),
-            ExplicitAuthFlows=client_cfg.get(
-                "ExplicitAuthFlows",
-                ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_ADMIN_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"],
-            ),
-            AllowedOAuthFlows=client_cfg.get("AllowedOAuthFlows", ["code"]),
-            AllowedOAuthScopes=client_cfg.get("AllowedOAuthScopes", ["openid", "email", "profile"]),
-            AllowedOAuthFlowsUserPoolClient=client_cfg.get("AllowedOAuthFlowsUserPoolClient", True),
-            CallbackURLs=client_cfg.get("CallbackURLs", []),
-            LogoutURLs=client_cfg.get("LogoutURLs", []),
-            SupportedIdentityProviders=supported,
+        update_kwargs = build_user_pool_client_update_request(
+            cognito,
+            user_pool_id=pool_id,
+            client_id=app["client_id"],
+            overrides={},
         )
+        supported = merge_unique_strings(
+            update_kwargs.get("SupportedIdentityProviders", []),
+            ["Google"],
+        )
+        update_kwargs["SupportedIdentityProviders"] = supported
+        cognito.update_user_pool_client(**update_kwargs)
         console.print(f"[green]✓[/green]  Enabled Google provider on app client: {app['client_name']} ({app['client_id']})")
 
     except Exception as e:
@@ -1720,31 +1718,20 @@ def fix_auth_flows():
         region = _get_cognito_region()
         cognito = boto3.client("cognito-idp", region_name=region)
 
-        # Get current client config
-        client_config = cognito.describe_user_pool_client(
-            UserPoolId=pool_id,
-            ClientId=client_id,
-        )["UserPoolClient"]
-
         console.print(f"[cyan]Updating app client {client_id}...[/cyan]")
 
-        # Update with required auth flows
-        cognito.update_user_pool_client(
-            UserPoolId=pool_id,
-            ClientId=client_id,
-            ClientName=client_config.get("ClientName", "ursa-client"),
-            ExplicitAuthFlows=[
-                "ALLOW_USER_PASSWORD_AUTH",
-                "ALLOW_ADMIN_USER_PASSWORD_AUTH",
-                "ALLOW_REFRESH_TOKEN_AUTH",
-            ],
-            # Preserve existing OAuth config if present
-            AllowedOAuthFlows=client_config.get("AllowedOAuthFlows", []),
-            AllowedOAuthScopes=client_config.get("AllowedOAuthScopes", []),
-            AllowedOAuthFlowsUserPoolClient=client_config.get("AllowedOAuthFlowsUserPoolClient", False),
-            CallbackURLs=client_config.get("CallbackURLs", []),
-            SupportedIdentityProviders=client_config.get("SupportedIdentityProviders", ["COGNITO"]),
+        update_kwargs = build_user_pool_client_update_request(
+            cognito,
+            user_pool_id=pool_id,
+            client_id=client_id,
+            overrides={},
         )
+        required_flows = merge_unique_strings(
+            update_kwargs.get("ExplicitAuthFlows", []),
+            REQUIRED_AUTH_FLOWS,
+        )
+        update_kwargs["ExplicitAuthFlows"] = required_flows
+        cognito.update_user_pool_client(**update_kwargs)
 
         console.print("[green]✓[/green]  Enabled auth flows:")
         console.print("     - ALLOW_USER_PASSWORD_AUTH")
