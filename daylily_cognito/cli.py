@@ -514,9 +514,7 @@ def _resolve_context_name_for_print(
     if pool_id:
         pool_context_name = _pool_context_name(pool_id, region or "")
     elif pool_name:
-        pool_context_name = _resolve_pool_print_context_name(
-            pool_name, region or "", profile=profile
-        )
+        pool_context_name = _resolve_pool_print_context_name(pool_name, region or "", profile=profile)
     else:
         pool_context_name = get_active_context_name()
         if not pool_context_name:
@@ -530,11 +528,7 @@ def _resolve_context_name_for_print(
     selected_pool_id = (
         pool_id
         or str(pool_values.get("COGNITO_USER_POOL_ID") or "").strip()
-        or (
-            pool_context_name.split(".", 2)[0].strip()
-            if region and pool_context_name.endswith(f".{region}")
-            else ""
-        )
+        or (pool_context_name.split(".", 2)[0].strip() if region and pool_context_name.endswith(f".{region}") else "")
     ).strip()
     selected_region = (
         region
@@ -542,9 +536,7 @@ def _resolve_context_name_for_print(
         or str(pool_values.get("AWS_REGION") or "").strip()
     ).strip()
     if not selected_pool_id or not selected_region:
-        console.print(
-            "[red]✗[/red]  Unable to resolve pool ID/region for the requested app context"
-        )
+        console.print("[red]✗[/red]  Unable to resolve pool ID/region for the requested app context")
         raise typer.Exit(1)
 
     contexts = list_context_values()
@@ -552,10 +544,7 @@ def _resolve_context_name_for_print(
     for name, values in contexts.items():
         if str(values.get("COGNITO_USER_POOL_ID") or "").strip() != selected_pool_id:
             continue
-        context_region = (
-            str(values.get("COGNITO_REGION") or "").strip()
-            or str(values.get("AWS_REGION") or "").strip()
-        )
+        context_region = str(values.get("COGNITO_REGION") or "").strip() or str(values.get("AWS_REGION") or "").strip()
         if context_region != selected_region:
             continue
         if client_name and str(values.get("COGNITO_CLIENT_NAME") or "").strip() != client_name:
@@ -1015,9 +1004,7 @@ def config_print(
     client_name: Optional[str] = typer.Option(
         None, "--client-name", help="App client name for a stored Daycog context"
     ),
-    client_id: Optional[str] = typer.Option(
-        None, "--client-id", help="App client ID for a stored Daycog context"
-    ),
+    client_id: Optional[str] = typer.Option(None, "--client-id", help="App client ID for a stored Daycog context"),
     profile: Optional[str] = typer.Option(None, "--profile", help="AWS profile to use when resolving pool names"),
     region: Optional[str] = typer.Option(None, "--region", help="AWS region for a stored Daycog context"),
     as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),

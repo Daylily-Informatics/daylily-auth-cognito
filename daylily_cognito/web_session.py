@@ -175,7 +175,9 @@ class SessionPrincipal:
 
 
 ResolvePrincipalResult = Union[SessionPrincipal, Mapping[str, Any]]
-ResolvePrincipal = Callable[[Mapping[str, Any], Request], Union[ResolvePrincipalResult, Awaitable[ResolvePrincipalResult]]]
+ResolvePrincipal = Callable[
+    [Mapping[str, Any], Request], Union[ResolvePrincipalResult, Awaitable[ResolvePrincipalResult]]
+]
 
 
 def configure_session_middleware(app: FastAPI, config: CognitoWebSessionConfig) -> None:
