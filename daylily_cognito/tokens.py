@@ -49,6 +49,7 @@ def decode_jwt_unverified(token: str) -> dict[str, Any]:
             "verify_aud": False,
             "verify_iat": False,
             "verify_nbf": False,
+            "verify_at_hash": False,
         },
     )
 

@@ -60,6 +60,14 @@ class TestDecodeJwtUnverified:
         assert claims["sub"] == "user123"
         # Note: decode_jwt_unverified does NOT check expiration
 
+    def test_decode_token_with_at_hash(self) -> None:
+        """Decodes ID-token-style claims without requiring a paired access token."""
+        token = _create_test_token({"sub": "user123", "at_hash": "hash-value"})
+        claims = decode_jwt_unverified(token)
+
+        assert claims["sub"] == "user123"
+        assert claims["at_hash"] == "hash-value"
+
     def test_decode_import_error_when_jose_missing(self) -> None:
         real_import = builtins.__import__
 
