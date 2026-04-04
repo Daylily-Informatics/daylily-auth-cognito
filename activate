@@ -99,6 +99,7 @@ if ! python -c "import pytest" >/dev/null 2>&1; then
 fi
 
 if [ "$_DAYCOG_NEEDS_INSTALL" = "1" ]; then
+  export SETUPTOOLS_SCM_PRETEND_VERSION="0.4.4"
   echo "Installing daylily-cognito in editable mode..."
   if ! python -m pip install --no-build-isolation -e "${_DAYCOG_ACTIVATE_DIR}[dev,auth]"; then
     echo "Editable install failed" >&2
