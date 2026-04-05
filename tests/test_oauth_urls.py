@@ -249,7 +249,6 @@ class TestRefreshWithRefreshToken:
 
     def _make_config(self, **overrides) -> CognitoConfig:
         defaults = {
-            "name": "test",
             "region": "us-west-2",
             "user_pool_id": "us-west-2_TestPool",
             "app_client_id": "client123",

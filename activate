@@ -37,6 +37,7 @@ if [ -z "$_DAYCOG_ACTIVATE_DIR" ]; then
 fi
 
 _DAYCOG_VENV_DIR="$_DAYCOG_ACTIVATE_DIR/.venv"
+_DAYCOG_CLI_CORE_YO_DIR="$_DAYCOG_ACTIVATE_DIR/../cli-core-yo"
 
 _daycog_distribution_is_editable_from_repo() {
   python - "$1" <<'PY' >/dev/null 2>&1
@@ -63,6 +64,24 @@ if not editable_location:
     raise SystemExit(1)
 
 raise SystemExit(0 if pathlib.Path(editable_location).resolve() == repo_root else 1)
+PY
+}
+
+_daycog_distribution_requires_expected_cli_core_yo() {
+  python - "$_DAYCOG_ACTIVATE_DIR/pyproject.toml" <<'PY' >/dev/null 2>&1
+import importlib.metadata
+import pathlib
+import sys
+
+expected = "1.2.2"
+pyproject_path = pathlib.Path(sys.argv[1])
+try:
+    installed = importlib.metadata.version("cli-core-yo")
+except importlib.metadata.PackageNotFoundError:
+    raise SystemExit(1)
+
+pyproject_text = pyproject_path.read_text(encoding="utf-8").replace(" ", "")
+raise SystemExit(0 if installed == expected and "cli-core-yo==1.2.2" in pyproject_text else 1)
 PY
 }
 
@@ -94,6 +113,9 @@ _DAYCOG_NEEDS_INSTALL=0
 if ! _daycog_distribution_is_editable_from_repo "$_DAYCOG_ACTIVATE_DIR"; then
   _DAYCOG_NEEDS_INSTALL=1
 fi
+if ! _daycog_distribution_requires_expected_cli_core_yo; then
+  _DAYCOG_NEEDS_INSTALL=1
+fi
 if ! python -c "import pytest" >/dev/null 2>&1; then
   _DAYCOG_NEEDS_INSTALL=1
 fi
@@ -111,6 +133,17 @@ if [ "$_DAYCOG_NEEDS_INSTALL" = "1" ]; then
   fi
 fi
 
+if [ -d "$_DAYCOG_CLI_CORE_YO_DIR" ] && [ -f "$_DAYCOG_CLI_CORE_YO_DIR/pyproject.toml" ]; then
+  echo "Using cli-core-yo from sibling checkout via PYTHONPATH..."
+  case ":${PYTHONPATH:-}:" in
+    *:"$_DAYCOG_CLI_CORE_YO_DIR":*)
+      ;;
+    *)
+      export PYTHONPATH="$_DAYCOG_CLI_CORE_YO_DIR${PYTHONPATH:+:$PYTHONPATH}"
+      ;;
+  esac
+fi
+
 echo "daycog is ready: $(command -v daycog)"
 
 if [ "${DAYCOG_INSTALL_COMPLETION:-1}" = "1" ]; then
@@ -120,29 +153,34 @@ if [ "${DAYCOG_INSTALL_COMPLETION:-1}" = "1" ]; then
   fi
 fi
 
-_daycog_load_active_context() {
-  if [ -f "$HOME/.config/daycog/config.yaml" ]; then
-    _DAYCOG_EXPORTS="$(python - <<'PY'
-from daylily_cognito.config import get_context_values
-for key, value in sorted(get_context_values().items()):
-    if value:
-        escaped = str(value).replace('"', '\\"')
-        print(f'export {key}="{escaped}"')
-PY
-)"
-    if [ -n "$_DAYCOG_EXPORTS" ]; then
-      eval "$_DAYCOG_EXPORTS"
-    fi
-    unset _DAYCOG_EXPORTS
-    return 0
-  fi
-}
-
-_daycog_load_active_context
-
 # Wrap daycog so `daycog setup` can update the caller shell environment.
 daycog() {
-  if [ "$1" = "setup" ]; then
+  _DAYCOG_CAPTURE_CMD=""
+  _DAYCOG_SCAN_EXPECTS_CONFIG_VALUE=0
+  for _DAYCOG_SCAN_ARG in "$@"; do
+    if [ "$_DAYCOG_SCAN_EXPECTS_CONFIG_VALUE" = "1" ]; then
+      _DAYCOG_SCAN_EXPECTS_CONFIG_VALUE=0
+      continue
+    fi
+    case "$_DAYCOG_SCAN_ARG" in
+      --config)
+        _DAYCOG_SCAN_EXPECTS_CONFIG_VALUE=1
+        continue
+        ;;
+      --config=*)
+        continue
+        ;;
+      -*)
+        continue
+        ;;
+      *)
+        _DAYCOG_CAPTURE_CMD="$_DAYCOG_SCAN_ARG"
+        break
+        ;;
+    esac
+  done
+
+  if [ "$_DAYCOG_CAPTURE_CMD" = "setup" ] || [ "$_DAYCOG_CAPTURE_CMD" = "setup-with-google" ]; then
     _DAYCOG_SETUP_OUT="$(command daycog "$@" --print-exports)"
     _DAYCOG_SETUP_RC=$?
     printf "%s\n" "$_DAYCOG_SETUP_OUT"
@@ -151,7 +189,6 @@ daycog() {
       if [ -n "$_DAYCOG_EXPORTS" ]; then
         eval "$_DAYCOG_EXPORTS"
       fi
-      _daycog_load_active_context
     fi
     _DAYCOG_RETURN_RC=$_DAYCOG_SETUP_RC
     _DAYCOG_FINAL_RC=$_DAYCOG_RETURN_RC
@@ -159,15 +196,23 @@ daycog() {
     unset _DAYCOG_RETURN_RC
     unset _DAYCOG_SETUP_OUT
     unset _DAYCOG_SETUP_RC
+    unset _DAYCOG_CAPTURE_CMD
+    unset _DAYCOG_SCAN_ARG
+    unset _DAYCOG_SCAN_EXPECTS_CONFIG_VALUE
     return "$_DAYCOG_FINAL_RC"
   fi
 
+  unset _DAYCOG_CAPTURE_CMD
+  unset _DAYCOG_SCAN_ARG
+  unset _DAYCOG_SCAN_EXPECTS_CONFIG_VALUE
   command daycog "$@"
 }
 
 unset _DAYCOG_ACTIVATE_DIR
+unset _DAYCOG_CLI_CORE_YO_DIR
 unset _DAYCOG_SOURCE
 unset _DAYCOG_SOURCED
 unset _DAYCOG_VENV_DIR
 unset _DAYCOG_NEEDS_INSTALL
 unset -f _daycog_distribution_is_editable_from_repo
+unset -f _daycog_distribution_requires_expected_cli_core_yo

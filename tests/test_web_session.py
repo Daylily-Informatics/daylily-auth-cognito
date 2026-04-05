@@ -524,9 +524,9 @@ class TestHostedUiSessionFlow:
         assert unauthenticated.status_code == 401
         assert unauthenticated.json()["reason"] is None
 
-        cached = client.get("/cached")
-        assert cached.status_code == 200
-        assert cached.json()["user_sub"] == "cached-user"
+        cached_response = client.get("/cached")
+        assert cached_response.status_code == 200
+        assert cached_response.json()["user_sub"] == "cached-user"
 
         client.get("/seed-invalid")
         invalid = client.get("/me")

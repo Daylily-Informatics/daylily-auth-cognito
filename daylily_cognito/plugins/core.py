@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import typer
 from cli_core_yo import ccyo_out
-from rich.console import Console
 from rich.table import Table
 
 from .._app_client_update import (
@@ -24,148 +22,17 @@ from .._app_client_update import (
     merge_unique_strings,
 )
 from ..config import (
-    CognitoConfig,
-    delete_context,
-    get_active_context_name,
-    get_config_store_path,
-    get_context_values,
-    list_context_values,
-    save_context_values,
-    set_active_context,
+    ConfigError,
+    active_config_path,
+    load_config_file,
+    load_config_file_if_present,
+    resolve_runtime_config,
+    write_config_file,
 )
 
 cognito_app = typer.Typer(help="Cognito authentication management commands")
-config_app = typer.Typer(help="Manage persisted daycog CLI configuration")
-console = Console()
-
-# Global state for --config option (set by callback)
-_config_name: Optional[str] = None
-
-
-def _app_callback(
-    config: Optional[str] = typer.Option(
-        None,
-        "--config",
-        "-c",
-        help="Named config to use (reads DAYCOG_<NAME>_* env vars)",
-        envvar="DAYCOG_CONFIG",
-    ),
-) -> None:
-    """Process global options before commands."""
-    global _config_name
-    _config_name = config
-
-
-cognito_app.callback()(_app_callback)
+config_app = typer.Typer(help="Manage the effective daycog auth config file")
 cognito_app.add_typer(config_app, name="config")
-
-
-def _config_store_path() -> Path:
-    """Return the canonical Daycog config store path."""
-    return get_config_store_path()
-
-
-def _config_dir() -> Path:
-    """Return daycog config directory."""
-    return Path.home() / ".config" / "daycog"
-
-
-def _pool_context_name(pool_key: str, region: str) -> str:
-    """Return the stored pool-context name, scoped by region."""
-    return f"{pool_key}.{region}"
-
-
-def _sanitize_filename_part(value: str) -> str:
-    """Convert arbitrary names to filesystem-friendly parts."""
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-") or "app"
-
-
-def _app_context_name(pool_key: str, region: str, client_name: str) -> str:
-    """Return the app-scoped context name for a pool/region."""
-    safe_client = _sanitize_filename_part(client_name)
-    return f"{pool_key}.{region}.{safe_client}"
-
-
-def _context_targets(
-    pool_id: str,
-    region: str,
-    *,
-    pool_name: Optional[str] = None,
-    client_name: Optional[str] = None,
-) -> tuple[str, List[str]]:
-    """Return canonical context name and alternate variants for a pool or app context."""
-    primary_name = (
-        _app_context_name(pool_id, region, client_name) if client_name else _pool_context_name(pool_id, region)
-    )
-    legacy_names: List[str] = []
-    if pool_name and pool_name != pool_id:
-        legacy_names.append(
-            _app_context_name(pool_name, region, client_name) if client_name else _pool_context_name(pool_name, region)
-        )
-    return primary_name, legacy_names
-
-
-def _existing_context_names(primary_name: str, legacy_names: Optional[List[str]] = None) -> List[str]:
-    """Return existing canonical or alternate context names for a target."""
-    contexts = list_context_values()
-    names = [primary_name]
-    if legacy_names:
-        names.extend(legacy_names)
-    return [name for name in names if name in contexts]
-
-
-def _remove_contexts(names: List[str]) -> List[str]:
-    """Remove stored contexts if present and return removed context names."""
-    removed: List[str] = []
-    for name in names:
-        if delete_context(name):
-            removed.append(name)
-    return removed
-
-
-def _write_context(
-    primary_name: str,
-    values: Dict[str, str],
-    *,
-    legacy_names: Optional[List[str]] = None,
-    set_active: bool = False,
-    skip_existing: bool = False,
-) -> tuple[bool, List[str]]:
-    """Write context values, seeding from alternate contexts and pruning migrated aliases."""
-    legacy_names = legacy_names or []
-    existing_legacy = [name for name in legacy_names if get_context_values(name)]
-    existing_primary = get_context_values(primary_name)
-
-    if skip_existing and existing_primary and not existing_legacy:
-        return False, []
-
-    merged: Dict[str, str] = {}
-    for name in existing_legacy:
-        merged.update(get_context_values(name))
-    merged.update(existing_primary)
-    merged.update(values)
-    save_context_values(primary_name, merged, set_active=set_active)
-
-    removed = _remove_contexts(existing_legacy)
-    return True, removed
-
-
-def _cleanup_pool_contexts(pool_name: str, region: str, pool_id: str) -> List[str]:
-    """Delete stored contexts for a deleted pool and return removed context names."""
-    removed: List[str] = []
-    active_name = get_active_context_name()
-    contexts = list_context_values()
-    prefixes = {
-        f"{pool_name}.{region}",
-        f"{pool_id}.{region}",
-    }
-    for name, values in contexts.items():
-        if any(name == prefix or name.startswith(f"{prefix}.") for prefix in prefixes):
-            if name not in removed:
-                removed.extend(_remove_contexts([name]))
-        elif active_name == name and values.get("COGNITO_USER_POOL_ID") == pool_id:
-            removed.extend(_remove_contexts([name]))
-    return removed
 
 
 def _resolve_profile_region(profile: Optional[str], region: Optional[str]) -> tuple[str, str]:
@@ -237,7 +104,7 @@ def _resolve_google_client_details(
     google_client_secret: Optional[str],
     google_client_json: Optional[str],
 ) -> tuple[str, str]:
-    """Resolve Google OAuth client credentials from flags/json/env."""
+    """Resolve Google OAuth client credentials from flags/json/config file."""
     resolved_id = google_client_id
     resolved_secret = google_client_secret
 
@@ -251,25 +118,19 @@ def _resolve_google_client_details(
             ccyo_out.info(f"[red]✗[/red]  Failed to read Google client JSON: {e}")
             raise typer.Exit(1)
 
-    # Fall back to config store for Google OAuth values
     if not resolved_id or not resolved_secret:
-        if _config_name:
-            try:
-                cfg = CognitoConfig.from_env(_config_name)
-                resolved_id = resolved_id or cfg.google_client_id
-                resolved_secret = resolved_secret or cfg.google_client_secret
-            except ValueError:
-                pass
-        else:
-            values = get_context_values()
+        try:
+            values = load_config_file(active_config_path(), require_required_keys=True)
             resolved_id = resolved_id or values.get("GOOGLE_CLIENT_ID")
             resolved_secret = resolved_secret or values.get("GOOGLE_CLIENT_SECRET")
+        except ConfigError:
+            pass
 
     if not resolved_id or not resolved_secret:
         ccyo_out.info("[red]✗[/red]  Google OAuth client details missing")
         ccyo_out.info(
             "   Provide --google-client-id/--google-client-secret, or --google-client-json, "
-            "or run [cyan]daycog setup[/cyan] with Google config"
+            "or store GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the active config file"
         )
         raise typer.Exit(1)
 
@@ -363,7 +224,7 @@ def _describe_client(
     client_name: Optional[str] = None,
     client_id: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Describe an app client and normalize values needed for stored contexts."""
+    """Describe an app client and normalize values needed for flat config files."""
     found = _find_client(cognito, pool_id, client_name=client_name, client_id=client_id)
     client_cfg = cognito.describe_user_pool_client(UserPoolId=pool_id, ClientId=found["client_id"])["UserPoolClient"]
     callback_urls = client_cfg.get("CallbackURLs", [])
@@ -402,22 +263,14 @@ def _select_config_client(
     if len(clients) == 1:
         return _describe_client(cognito, pool_id, client_id=clients[0]["ClientId"])
 
-    ccyo_out.info(
-        "[red]✗[/red]  Pool has multiple app clients; pass --client-name/--client-id or use "
-        "[cyan]daycog config create-all[/cyan]"
-    )
+    ccyo_out.info("[red]✗[/red]  Pool has multiple app clients; pass --client-name or --client-id")
     for client in clients:
         ccyo_out.info(f"   {client.get('ClientName', '')} ({client.get('ClientId', '')})")
     raise typer.Exit(1)
 
 
-def _read_context(name: str) -> Dict[str, str]:
-    """Read a stored Daycog context from the YAML config store."""
-    return get_context_values(name)
-
-
 def _render_env_lines(values: Dict[str, str]) -> List[str]:
-    """Render key/value env settings as stable KEY=VALUE lines."""
+    """Render key/value config settings as stable KEY=VALUE lines."""
     keys = [
         "AWS_PROFILE",
         "AWS_REGION",
@@ -439,14 +292,35 @@ def _render_env_lines(values: Dict[str, str]) -> List[str]:
     return lines
 
 
-def _build_config_values(profile: str, region: str, pool_details: Dict[str, str]) -> Dict[str, str]:
-    """Build env values from AWS-resolved pool and app details."""
-    config_values = {
+def _build_config_values(
+    profile: str,
+    region: str,
+    pool_details: Dict[str, str],
+    *,
+    existing: Optional[Dict[str, str]] = None,
+) -> Dict[str, str]:
+    """Build flat-file config values from AWS-resolved pool and app details."""
+    config_values = dict(existing or {})
+    for managed_key in [
+        "AWS_PROFILE",
+        "AWS_REGION",
+        "COGNITO_REGION",
+        "COGNITO_USER_POOL_ID",
+        "COGNITO_APP_CLIENT_ID",
+        "COGNITO_CLIENT_NAME",
+        "COGNITO_CALLBACK_URL",
+        "COGNITO_LOGOUT_URL",
+        "COGNITO_DOMAIN",
+    ]:
+        config_values.pop(managed_key, None)
+    config_values.update(
+        {
         "AWS_PROFILE": profile,
         "AWS_REGION": region,
         "COGNITO_REGION": region,
         "COGNITO_USER_POOL_ID": pool_details["pool_id"],
-    }
+        }
+    )
 
     optional_keys = {
         "client_id": "COGNITO_APP_CLIENT_ID",
@@ -481,194 +355,112 @@ def _build_pool_details(
     return details
 
 
-def _context_payload(name: str) -> Dict[str, Any]:
-    """Return a machine-readable representation of a stored Daycog context."""
-    values = _read_context(name)
-    return {
-        "config_store_path": str(_config_store_path()),
-        "context_name": name,
-        "values": values,
-    }
+def _config_payload(path: Path, values: Dict[str, str]) -> Dict[str, Any]:
+    """Return a machine-readable representation of the effective flat config file."""
+    return {"config_path": str(path), "values": values}
 
 
-def _print_context(name: str, *, as_json: bool = False) -> None:
-    """Print a Daycog context name and contents from the YAML config store."""
-    payload = _context_payload(name)
+def _print_config(path: Path, values: Dict[str, str], *, as_json: bool = False) -> None:
+    """Print the effective flat config file."""
+    payload = _config_payload(path, values)
     if as_json:
         ccyo_out.emit_json(payload)
         return
 
-    ccyo_out.info(f"{payload['config_store_path']} :: {name}")
+    ccyo_out.info(f"{payload['config_path']}")
     lines = _render_env_lines(payload["values"])
     if lines:
         ccyo_out.info("\n".join(lines))
 
 
-def _resolve_context_name_for_print(
-    *,
-    pool_name: Optional[str],
-    pool_id: Optional[str],
-    region: Optional[str],
-    profile: Optional[str],
-    client_name: Optional[str],
-    client_id: Optional[str],
-) -> str:
-    """Resolve the stored pool/app context name for config-print operations."""
-    if client_name and client_id:
-        ccyo_out.info("[red]✗[/red]  Provide only one of: --client-name or --client-id")
-        raise typer.Exit(1)
-
-    if pool_id:
-        pool_context_name = _pool_context_name(pool_id, region or "")
-    elif pool_name:
-        pool_context_name = _resolve_pool_print_context_name(pool_name, region or "", profile=profile)
-    else:
-        pool_context_name = get_active_context_name()
-        if not pool_context_name:
-            ccyo_out.info("[red]✗[/red]  No active Daycog context is set")
-            raise typer.Exit(1)
-
-    if not client_name and not client_id:
-        return pool_context_name
-
-    pool_values = get_context_values(pool_context_name)
-    selected_pool_id = (
-        pool_id
-        or str(pool_values.get("COGNITO_USER_POOL_ID") or "").strip()
-        or (pool_context_name.split(".", 2)[0].strip() if region and pool_context_name.endswith(f".{region}") else "")
-    ).strip()
-    selected_region = (
-        region
-        or str(pool_values.get("COGNITO_REGION") or "").strip()
-        or str(pool_values.get("AWS_REGION") or "").strip()
-    ).strip()
-    if not selected_pool_id or not selected_region:
-        ccyo_out.info("[red]✗[/red]  Unable to resolve pool ID/region for the requested app context")
-        raise typer.Exit(1)
-
-    contexts = list_context_values()
-    matches: list[str] = []
-    for name, values in contexts.items():
-        if str(values.get("COGNITO_USER_POOL_ID") or "").strip() != selected_pool_id:
-            continue
-        context_region = str(values.get("COGNITO_REGION") or "").strip() or str(values.get("AWS_REGION") or "").strip()
-        if context_region != selected_region:
-            continue
-        if client_name and str(values.get("COGNITO_CLIENT_NAME") or "").strip() != client_name:
-            continue
-        if client_id and str(values.get("COGNITO_APP_CLIENT_ID") or "").strip() != client_id:
-            continue
-        matches.append(name)
-
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        ccyo_out.info("[red]✗[/red]  Multiple matching app contexts found:")
-        for match in sorted(matches):
-            ccyo_out.info(f"   {match}")
-        raise typer.Exit(1)
-
-    if client_name:
-        return _app_context_name(selected_pool_id, selected_region, client_name)
-
-    ccyo_out.info("[red]✗[/red]  No stored app context matches the requested client")
-    raise typer.Exit(1)
+def _handle_config_error(exc: Exception) -> None:
+    """Emit a consistent config-file error with remediation."""
+    path = active_config_path()
+    ccyo_out.info(f"[red]✗[/red]  {exc}")
+    ccyo_out.info(f"   Config path: [cyan]{path}[/cyan]")
+    ccyo_out.info("   Use [cyan]daycog config init[/cyan] to create the file.")
+    ccyo_out.info("   Override for one invocation with [cyan]daycog --config /path/to/config.yaml ...[/cyan]")
+    raise SystemExit(1)
 
 
-def _resolve_pool_print_context_name(pool_name: str, region: str, profile: Optional[str] = None) -> str:
-    """Resolve the most appropriate pool context name when given a pool name."""
-    legacy_name = _pool_context_name(pool_name, region)
-    resolved_profile = profile or os.environ.get("AWS_PROFILE")
-    if not resolved_profile:
-        return legacy_name
-
+def _get_existing_config_values(*, require_required_keys: bool = False) -> Dict[str, str]:
+    """Load the effective config file if it exists."""
     try:
-        import boto3
-
-        session = boto3.Session(profile_name=resolved_profile, region_name=region)
-        cognito = session.client("cognito-idp")
-        pool = _resolve_pool(cognito, pool_name=pool_name)
-        canonical_name = _pool_context_name(pool["pool_id"], region)
-        if get_context_values(canonical_name) or not get_context_values(legacy_name):
-            return canonical_name
-    except Exception:
-        pass
-
-    return legacy_name
+        return load_config_file_if_present(active_config_path(), require_required_keys=require_required_keys)
+    except ConfigError as exc:
+        _handle_config_error(exc)
+    raise AssertionError("unreachable")
 
 
-def _collect_known_cli_values() -> Dict[str, str]:
-    """Collect values currently known to the CLI from config/env context."""
-    values: Dict[str, str] = {}
-
-    if _config_name:
+def _get_runtime_config(
+    *,
+    profile: Optional[str] = None,
+    region: Optional[str] = None,
+    require_config: bool = True,
+    require_required_keys: bool = True,
+    require_profile: bool = False,
+) -> Any:
+    """Resolve the effective config file plus AWS precedence."""
+    try:
+        runtime = resolve_runtime_config(
+            profile=profile,
+            region=region,
+            require_config=require_config,
+            require_required_keys=require_required_keys,
+        )
+    except ConfigError as exc:
+        _handle_config_error(exc)
+    if require_profile:
         try:
-            cfg = CognitoConfig.from_env(_config_name)
-            values["COGNITO_REGION"] = cfg.region
-            values["COGNITO_USER_POOL_ID"] = cfg.user_pool_id
-            values["COGNITO_APP_CLIENT_ID"] = cfg.app_client_id
-            if cfg.aws_profile:
-                values["AWS_PROFILE"] = cfg.aws_profile
-            if cfg.google_client_id:
-                values["GOOGLE_CLIENT_ID"] = cfg.google_client_id
-            if cfg.google_client_secret:
-                values["GOOGLE_CLIENT_SECRET"] = cfg.google_client_secret
-            if cfg.cognito_domain:
-                values["COGNITO_DOMAIN"] = cfg.cognito_domain
-        except ValueError:
-            pass
-
-    # AWS_PROFILE and AWS_REGION are legitimate boto3 SDK env vars that
-    # boto3 reads from os.environ for credential/region selection.
-    env = os.environ
-    if env.get("AWS_PROFILE"):
-        values["AWS_PROFILE"] = env["AWS_PROFILE"]
-    if env.get("AWS_REGION"):
-        values["AWS_REGION"] = env["AWS_REGION"]
-
-    return values
+            runtime.require_aws_profile()
+        except ConfigError as exc:
+            _handle_config_error(exc)
+    return runtime
 
 
-def _check_aws_profile() -> None:
-    """Check if AWS_PROFILE is set."""
-    if not os.environ.get("AWS_PROFILE"):
-        ccyo_out.info("[red]✗[/red]  AWS_PROFILE not set")
-        ccyo_out.info("   Set it with: [cyan]export AWS_PROFILE=your-profile[/cyan]")
-        raise typer.Exit(1)
-
-
-def _get_cognito_region() -> str:
-    """Get the AWS region for Cognito operations from the config store.
-
-    Priority order:
-    1. Named config (if --config provided)
-    2. Active context from config store
-
-    Raises:
-        typer.Exit(1) if not configured.
-    """
-    if _config_name:
-        try:
-            config = CognitoConfig.from_env(_config_name)
-            return config.region
-        except ValueError:
-            pass
-    else:
-        values = get_context_values()
-        region = values.get("COGNITO_REGION") or values.get("AWS_REGION")
-        if region:
-            return region
-
-    ccyo_out.info("[red]✗[/red]  AWS region not configured")
-    ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
-    raise typer.Exit(1)
-
-
-def _get_cognito_client() -> Any:
-    """Return a Cognito IDP client for the configured region."""
+def _get_cognito_client(
+    *,
+    profile: Optional[str] = None,
+    region: Optional[str] = None,
+    require_config: bool = True,
+) -> Any:
+    """Return a Cognito IDP client using effective config-path semantics."""
     import boto3
 
-    return boto3.client("cognito-idp", region_name=_get_cognito_region())
+    runtime = _get_runtime_config(
+        profile=profile,
+        region=region,
+        require_config=require_config,
+        require_required_keys=require_config,
+        require_profile=True,
+    )
+    session = boto3.Session(profile_name=runtime.require_aws_profile(), region_name=runtime.aws_region)
+    return session.client("cognito-idp")
+
+
+def _get_pool_id() -> str:
+    """Return the configured Cognito User Pool ID."""
+    runtime = _get_runtime_config(require_profile=False)
+    value = runtime.values.get("COGNITO_USER_POOL_ID", "").strip()
+    if value:
+        return value
+    _handle_config_error(ConfigError("Missing required config value: COGNITO_USER_POOL_ID"))
+    raise AssertionError("unreachable")
+
+
+def _get_client_id() -> str:
+    """Return the configured Cognito App Client ID."""
+    runtime = _get_runtime_config(require_profile=False)
+    value = runtime.values.get("COGNITO_APP_CLIENT_ID", "").strip()
+    if value:
+        return value
+    _handle_config_error(ConfigError("Missing required config value: COGNITO_APP_CLIENT_ID"))
+    raise AssertionError("unreachable")
+
+
+def _write_effective_config(values: Dict[str, str]) -> Path:
+    """Write the effective config file for this invocation."""
+    return write_config_file(active_config_path(), values)
 
 
 def _parse_attributes(values: List[str]) -> List[Dict[str, str]]:
@@ -693,37 +485,25 @@ def _parse_attributes(values: List[str]) -> List[Dict[str, str]]:
 @cognito_app.command("status")
 def status() -> None:
     """Check Cognito configuration status."""
-    _check_aws_profile()
-
     ccyo_out.info("[cyan]Checking Cognito configuration...[/cyan]\n")
 
     try:
         import boto3
 
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
+        runtime = _get_runtime_config(require_profile=True)
+        session = boto3.Session(profile_name=runtime.require_aws_profile(), region_name=runtime.aws_region)
+        cognito = session.client("cognito-idp")
 
         table = Table(title="Cognito Configuration")
         table.add_column("Property", style="cyan")
         table.add_column("Value")
         table.add_column("Source", style="dim")
 
-        # Determine source from config store
-        source = f"config:{_config_name}" if _config_name else "config"
-        if _config_name:
-            try:
-                config = CognitoConfig.from_env(_config_name)
-                pool_id = config.user_pool_id
-                client_id = config.app_client_id
-            except ValueError:
-                pool_id = ""
-                client_id = ""
-        else:
-            values = get_context_values()
-            pool_id = values.get("COGNITO_USER_POOL_ID", "")
-            client_id = values.get("COGNITO_APP_CLIENT_ID") or values.get("COGNITO_CLIENT_ID", "")
+        source = str(runtime.path)
+        pool_id = runtime.values.get("COGNITO_USER_POOL_ID", "")
+        client_id = runtime.values.get("COGNITO_APP_CLIENT_ID", "")
 
-        table.add_row("Region", region, source if _config_name else "")
+        table.add_row("Region", runtime.aws_region, source)
 
         if pool_id:
             try:
@@ -746,7 +526,7 @@ def status() -> None:
 
         if not pool_id or not client_id:
             ccyo_out.info("\n[yellow]⚠[/yellow]  Cognito not fully configured")
-            ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
+            ccyo_out.info("   Populate the active config file via [cyan]daycog setup[/cyan] or [cyan]daycog auth-config create[/cyan]")
 
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
@@ -812,17 +592,22 @@ def setup(
     tags: Optional[str] = typer.Option(None, "--tags", help="Comma-separated tags in key=value format"),
 ):
     """Create Cognito User Pool and App Client."""
-    resolved_profile, resolved_region = _resolve_profile_region(profile, region)
-
-    # Ensure boto3 and any downstream helpers see explicit values from flags.
-    os.environ["AWS_PROFILE"] = resolved_profile
-    os.environ["AWS_REGION"] = resolved_region
+    runtime = _get_runtime_config(
+        profile=profile,
+        region=region,
+        require_config=False,
+        require_required_keys=False,
+        require_profile=True,
+    )
+    resolved_profile = runtime.require_aws_profile()
+    resolved_region = runtime.aws_region
 
     ccyo_out.info("[cyan]Creating Cognito resources...[/cyan]")
 
     try:
         import boto3
 
+        session = boto3.Session(profile_name=resolved_profile, region_name=resolved_region)
         resolved_client_name = client_name or f"{pool_name}-client"
         resolved_domain_prefix = domain_prefix or pool_name
         resolved_callback_url = _resolve_callback_url(callback_url, port, callback_path)
@@ -835,7 +620,7 @@ def setup(
 
         ccyo_out.info(f"[dim]Profile: {resolved_profile}[/dim]")
         ccyo_out.info(f"[dim]Region: {resolved_region}[/dim]")
-        cognito = boto3.client("cognito-idp", region_name=resolved_region)
+        cognito = session.client("cognito-idp")
 
         # Check if pool already exists
         pools = cognito.list_user_pools(MaxResults=60)
@@ -912,53 +697,24 @@ def setup(
             client_id = client["UserPoolClient"]["ClientId"]
             ccyo_out.info(f"[green]✓[/green]  Created app client: {client_id}")
 
-        # Show configuration
-        setup_values = {
-            "AWS_PROFILE": resolved_profile,
-            "AWS_REGION": resolved_region,
-            "COGNITO_REGION": resolved_region,
-            "COGNITO_USER_POOL_ID": pool_id,
-            "COGNITO_APP_CLIENT_ID": client_id,
-            "COGNITO_CALLBACK_URL": resolved_callback_url,
-            "COGNITO_CLIENT_NAME": resolved_client_name,
-        }
-        if logout_url:
-            setup_values["COGNITO_LOGOUT_URL"] = logout_url
-        if resolved_cognito_domain:
-            setup_values["COGNITO_DOMAIN"] = resolved_cognito_domain
-        pool_context_name, pool_legacy_names = _context_targets(
-            pool_id,
+        setup_values = _build_config_values(
+            resolved_profile,
             resolved_region,
-            pool_name=pool_name,
+            {
+                "pool_id": pool_id,
+                "client_id": client_id,
+                "client_name": resolved_client_name,
+                "callback_url": resolved_callback_url,
+                "logout_url": logout_url or "",
+                "cognito_domain": resolved_cognito_domain or "",
+            },
+            existing=runtime.values,
         )
-        app_context_name, app_legacy_names = _context_targets(
-            pool_id,
-            resolved_region,
-            pool_name=pool_name,
-            client_name=resolved_client_name,
-        )
-        if _existing_context_names(pool_context_name, pool_legacy_names):
-            ccyo_out.info(
-                f"[yellow]⚠[/yellow]  Context already exists in {_config_store_path()}, updating: {pool_context_name}"
-            )
-        if _existing_context_names(app_context_name, app_legacy_names):
-            ccyo_out.info(
-                f"[yellow]⚠[/yellow]  Context already exists in {_config_store_path()}, updating: {app_context_name}"
-            )
-
-        _write_context(pool_context_name, setup_values, legacy_names=pool_legacy_names)
-        _write_context(
-            app_context_name,
-            setup_values,
-            legacy_names=app_legacy_names,
-            set_active=True,
-        )
+        config_path = _write_effective_config(setup_values)
 
         ccyo_out.info("\n[green]✓[/green]  Cognito setup complete")
-        ccyo_out.info(f"\nSaved Daycog contexts in [cyan]{_config_store_path()}[/cyan]:")
-        ccyo_out.info(f"   [cyan]{pool_context_name}[/cyan]")
-        ccyo_out.info(f"   [cyan]{app_context_name}[/cyan] [dim](app, active)[/dim]")
-        ccyo_out.info("\nValues written to the active Daycog context:")
+        ccyo_out.info(f"\nWrote config file: [cyan]{config_path}[/cyan]")
+        ccyo_out.info("\nValues written to the effective config file:")
         ccyo_out.info(f"   [cyan]COGNITO_USER_POOL_ID={pool_id}[/cyan]")
         ccyo_out.info(f"   [cyan]COGNITO_APP_CLIENT_ID={client_id}[/cyan]")
         ccyo_out.info(f"   [cyan]COGNITO_CALLBACK_URL={resolved_callback_url}[/cyan]")
@@ -967,7 +723,7 @@ def setup(
         if resolved_cognito_domain:
             ccyo_out.info(f"   [cyan]COGNITO_DOMAIN={resolved_cognito_domain}[/cyan]")
         if print_exports:
-            # Only AWS SDK env vars — Cognito config comes from the config store
+            # Only AWS SDK env vars are exported; Cognito settings live in the config file.
             ccyo_out.info("\n[bold]Shell exports (boto3 SDK only):[/bold]")
             ccyo_out.info(f'export AWS_PROFILE="{resolved_profile}"')
             ccyo_out.info(f'export AWS_REGION="{resolved_region}"')
@@ -977,36 +733,79 @@ def setup(
         raise typer.Exit(1)
 
 
+def _resolve_config_values_from_aws(
+    *,
+    pool_name: Optional[str],
+    pool_id: Optional[str],
+    client_name: Optional[str],
+    client_id: Optional[str],
+    callback_url: Optional[str],
+    logout_url: Optional[str],
+    profile: Optional[str],
+    region: Optional[str],
+    existing: Optional[Dict[str, str]] = None,
+) -> tuple[Path, Dict[str, str]]:
+    """Resolve a flat config payload from live AWS state."""
+    if client_name and client_id:
+        ccyo_out.info("[red]✗[/red]  Provide only one of: --client-name or --client-id")
+        raise typer.Exit(1)
+
+    runtime = _get_runtime_config(
+        profile=profile,
+        region=region,
+        require_config=False,
+        require_required_keys=False,
+        require_profile=True,
+    )
+
+    try:
+        import boto3
+
+        session = boto3.Session(profile_name=runtime.require_aws_profile(), region_name=runtime.aws_region)
+        cognito = session.client("cognito-idp")
+        pool = _resolve_pool(cognito, pool_name=pool_name, pool_id=pool_id)
+        selected_client = _select_config_client(
+            cognito,
+            pool["pool_id"],
+            client_name=client_name,
+            client_id=client_id,
+        )
+    except typer.Exit:
+        raise
+    except Exception as e:
+        ccyo_out.info(f"[red]✗[/red]  Error: {e}")
+        raise typer.Exit(1)
+
+    if not selected_client:
+        ccyo_out.info("[red]✗[/red]  Pool has no app clients; a flat config file requires an app client")
+        raise typer.Exit(1)
+
+    pool_details = _build_pool_details(pool, runtime.aws_region, selected_client)
+    if callback_url is not None:
+        pool_details["callback_url"] = callback_url
+    if logout_url is not None:
+        pool_details["logout_url"] = logout_url
+
+    config_values = _build_config_values(
+        runtime.require_aws_profile(),
+        runtime.aws_region,
+        pool_details,
+        existing=existing or runtime.values,
+    )
+    return active_config_path(), config_values
+
+
 @config_app.command("print")
 def config_print(
-    pool_name: Optional[str] = typer.Option(
-        None, "--pool-name", "--poor-name", help="Pool name for a stored Daycog context"
-    ),
-    pool_id: Optional[str] = typer.Option(None, "--pool-id", help="Pool ID for a stored Daycog context"),
-    client_name: Optional[str] = typer.Option(
-        None, "--client-name", help="App client name for a stored Daycog context"
-    ),
-    client_id: Optional[str] = typer.Option(None, "--client-id", help="App client ID for a stored Daycog context"),
-    profile: Optional[str] = typer.Option(None, "--profile", help="AWS profile to use when resolving pool names"),
-    region: Optional[str] = typer.Option(None, "--region", help="AWS region for a stored Daycog context"),
     as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Print the resolved Daycog context name and contents."""
-    if pool_name and pool_id:
-        ccyo_out.info("[red]✗[/red]  Provide only one of: --pool-name or --pool-id")
-        raise typer.Exit(1)
-    if (pool_name or pool_id) and not region:
-        ccyo_out.info("[red]✗[/red]  --region is required when using --pool-name or --pool-id")
-        raise typer.Exit(1)
-    context_name = _resolve_context_name_for_print(
-        pool_name=pool_name,
-        pool_id=pool_id,
-        region=region,
-        profile=profile,
-        client_name=client_name,
-        client_id=client_id,
-    )
-    _print_context(context_name, as_json=as_json)
+    """Print the effective auth config file."""
+    try:
+        path = active_config_path()
+        values = load_config_file(path, require_required_keys=True)
+    except ConfigError as exc:
+        _handle_config_error(exc)
+    _print_config(path, values, as_json=as_json)
 
 
 @config_app.command("create")
@@ -1022,75 +821,26 @@ def config_create(
     profile: Optional[str] = typer.Option(None, "--profile", help="AWS profile to use"),
     region: Optional[str] = typer.Option(None, "--region", help="AWS region to use"),
 ) -> None:
-    """Create pool/app contexts and update the active context from AWS."""
-    resolved_profile, resolved_region = _resolve_profile_region(profile, region)
-    if client_name and client_id:
-        ccyo_out.info("[red]✗[/red]  Provide only one of: --client-name or --client-id")
+    """Create the effective auth config file from live AWS state."""
+    path = active_config_path()
+    if path.exists():
+        ccyo_out.info(f"[red]✗[/red]  Config file already exists: {path}")
+        ccyo_out.info("   Use [cyan]daycog auth-config update[/cyan] to refresh it.")
         raise typer.Exit(1)
 
-    try:
-        import boto3
-
-        session = boto3.Session(profile_name=resolved_profile, region_name=resolved_region)
-        cognito = session.client("cognito-idp")
-        pool = _resolve_pool(cognito, pool_name=pool_name, pool_id=pool_id)
-        selected_client = _select_config_client(
-            cognito,
-            pool["pool_id"],
-            client_name=client_name,
-            client_id=client_id,
-        )
-    except typer.Exit:
-        raise
-    except Exception as e:
-        ccyo_out.info(f"[red]✗[/red]  Error: {e}")
-        raise typer.Exit(1)
-
-    pool_details = _build_pool_details(pool, resolved_region, selected_client)
-    if selected_client and callback_url is not None:
-        pool_details["callback_url"] = callback_url
-    if selected_client and logout_url is not None:
-        pool_details["logout_url"] = logout_url
-    config_values = _build_config_values(resolved_profile, resolved_region, pool_details)
-
-    pool_context_name, pool_legacy_names = _context_targets(
-        pool["pool_id"],
-        resolved_region,
-        pool_name=pool["pool_name"],
+    _, config_values = _resolve_config_values_from_aws(
+        pool_name=pool_name,
+        pool_id=pool_id,
+        client_name=client_name,
+        client_id=client_id,
+        callback_url=callback_url,
+        logout_url=logout_url,
+        profile=profile,
+        region=region,
+        existing={},
     )
-    if get_context_values(pool_context_name):
-        ccyo_out.info(f"[red]✗[/red]  Context already exists: {pool_context_name}")
-        raise typer.Exit(1)
-
-    app_context_name: Optional[str] = None
-    app_legacy_names: List[str] = []
-    selected_client_name = pool_details.get("client_name")
-    if selected_client_name:
-        app_context_name, app_legacy_names = _context_targets(
-            pool["pool_id"],
-            resolved_region,
-            pool_name=pool["pool_name"],
-            client_name=selected_client_name,
-        )
-        if get_context_values(app_context_name):
-            ccyo_out.info(f"[red]✗[/red]  Context already exists: {app_context_name}")
-            raise typer.Exit(1)
-
-    _write_context(pool_context_name, config_values, legacy_names=pool_legacy_names)
-    if app_context_name:
-        _write_context(
-            app_context_name,
-            config_values,
-            legacy_names=app_legacy_names,
-            set_active=True,
-        )
-    else:
-        ccyo_out.info("[yellow]⚠[/yellow]  Pool has no app clients; no app-scoped context written")
-        set_active_context(pool_context_name)
-
-    _print_context(pool_context_name)
-    if app_context_name:
-        _print_context(app_context_name)
+    _write_effective_config(config_values)
+    _print_config(path, config_values)
 
 
 @config_app.command("update")
@@ -1106,146 +856,26 @@ def config_update(
     profile: Optional[str] = typer.Option(None, "--profile", help="AWS profile to use"),
     region: Optional[str] = typer.Option(None, "--region", help="AWS region to use"),
 ) -> None:
-    """Update pool/app contexts and refresh the active context from AWS."""
-    resolved_profile, resolved_region = _resolve_profile_region(profile, region)
-    if client_name and client_id:
-        ccyo_out.info("[red]✗[/red]  Provide only one of: --client-name or --client-id")
-        raise typer.Exit(1)
-
+    """Update the effective auth config file from live AWS state."""
+    path = active_config_path()
     try:
-        import boto3
+        existing = load_config_file(path, require_required_keys=True)
+    except ConfigError as exc:
+        _handle_config_error(exc)
 
-        session = boto3.Session(profile_name=resolved_profile, region_name=resolved_region)
-        cognito = session.client("cognito-idp")
-        pool = _resolve_pool(cognito, pool_name=pool_name, pool_id=pool_id)
-        selected_client = _select_config_client(
-            cognito,
-            pool["pool_id"],
-            client_name=client_name,
-            client_id=client_id,
-        )
-    except typer.Exit:
-        raise
-    except Exception as e:
-        ccyo_out.info(f"[red]✗[/red]  Error: {e}")
-        raise typer.Exit(1)
-
-    pool_details = _build_pool_details(pool, resolved_region, selected_client)
-    if selected_client and callback_url is not None:
-        pool_details["callback_url"] = callback_url
-    if selected_client and logout_url is not None:
-        pool_details["logout_url"] = logout_url
-    config_values = _build_config_values(resolved_profile, resolved_region, pool_details)
-
-    pool_context_name, pool_legacy_names = _context_targets(
-        pool["pool_id"],
-        resolved_region,
-        pool_name=pool["pool_name"],
+    _, config_values = _resolve_config_values_from_aws(
+        pool_name=pool_name,
+        pool_id=pool_id,
+        client_name=client_name,
+        client_id=client_id,
+        callback_url=callback_url,
+        logout_url=logout_url,
+        profile=profile,
+        region=region,
+        existing=existing,
     )
-    _write_context(pool_context_name, config_values, legacy_names=pool_legacy_names)
-
-    app_context_name: Optional[str] = None
-    selected_client_name = pool_details.get("client_name")
-    if selected_client_name:
-        app_context_name, app_legacy_names = _context_targets(
-            pool["pool_id"],
-            resolved_region,
-            pool_name=pool["pool_name"],
-            client_name=selected_client_name,
-        )
-        _write_context(
-            app_context_name,
-            config_values,
-            legacy_names=app_legacy_names,
-            set_active=True,
-        )
-    else:
-        ccyo_out.info("[yellow]⚠[/yellow]  Pool has no app clients; no app-scoped context written")
-        set_active_context(pool_context_name)
-
-    _print_context(pool_context_name)
-    if app_context_name:
-        _print_context(app_context_name)
-
-
-@config_app.command("create-all")
-def config_create_all(
-    pool_name: Optional[str] = typer.Option(
-        None, "--pool-name", "--poor-name", help="Pool name to resolve and write config for"
-    ),
-    pool_id: Optional[str] = typer.Option(None, "--pool-id", help="Pool ID to resolve and write config for"),
-    default_client: Optional[str] = typer.Option(
-        None,
-        "--default-client",
-        help="Client name whose values should populate the pool context and active Daycog context",
-    ),
-    profile: Optional[str] = typer.Option(None, "--profile", help="AWS profile to use"),
-    region: Optional[str] = typer.Option(None, "--region", help="AWS region to use"),
-) -> None:
-    """Create app-scoped Daycog contexts for all clients in a pool."""
-    resolved_profile, resolved_region = _resolve_profile_region(profile, region)
-
-    try:
-        import boto3
-
-        session = boto3.Session(profile_name=resolved_profile, region_name=resolved_region)
-        cognito = session.client("cognito-idp")
-        pool = _resolve_pool(cognito, pool_name=pool_name, pool_id=pool_id)
-        clients = _list_pool_clients(cognito, pool["pool_id"])
-    except typer.Exit:
-        raise
-    except Exception as e:
-        ccyo_out.info(f"[red]✗[/red]  Error: {e}")
-        raise typer.Exit(1)
-
-    if not clients:
-        ccyo_out.info("[yellow]⚠[/yellow]  Pool has no app clients; nothing to create")
-        return
-
-    for client in clients:
-        client_details = _describe_client(cognito, pool["pool_id"], client_id=client["ClientId"])
-        config_values = _build_config_values(
-            resolved_profile,
-            resolved_region,
-            _build_pool_details(pool, resolved_region, client_details),
-        )
-        app_context_name, app_legacy_names = _context_targets(
-            pool["pool_id"],
-            resolved_region,
-            pool_name=pool["pool_name"],
-            client_name=client_details["client_name"],
-        )
-        wrote, _ = _write_context(
-            app_context_name,
-            config_values,
-            legacy_names=app_legacy_names,
-            skip_existing=True,
-        )
-        if wrote:
-            _print_context(app_context_name)
-        else:
-            ccyo_out.info(f"[yellow]⚠[/yellow]  Skipping existing context: {app_context_name}")
-
-    if default_client:
-        selected_client = _describe_client(cognito, pool["pool_id"], client_name=default_client)
-        config_values = _build_config_values(
-            resolved_profile,
-            resolved_region,
-            _build_pool_details(pool, resolved_region, selected_client),
-        )
-        pool_context_name, pool_legacy_names = _context_targets(
-            pool["pool_id"],
-            resolved_region,
-            pool_name=pool["pool_name"],
-        )
-        _write_context(pool_context_name, config_values, legacy_names=pool_legacy_names)
-        _write_context(
-            _app_context_name(pool["pool_id"], resolved_region, default_client),
-            config_values,
-            set_active=True,
-        )
-        _print_context(pool_context_name)
-        _print_context(get_active_context_name())
+    _write_effective_config(config_values)
+    _print_config(path, config_values)
 
 
 @cognito_app.command("list-pools")
@@ -1323,7 +953,7 @@ def add_app(
     scopes: str = typer.Option("openid,email,profile", "--scopes", help="Comma-separated OAuth scopes"),
     idps: str = typer.Option("COGNITO", "--idp", help="Comma-separated identity providers"),
     set_default: bool = typer.Option(
-        False, "--set-default", help="Also update the pool context and active Daycog context to this app"
+        False, "--set-default", help="Print a reminder to refresh the auth config file to this app"
     ),
 ) -> None:
     """Add a new app client to an existing pool."""
@@ -1363,41 +993,9 @@ def add_app(
         )
         client_id = client["UserPoolClient"]["ClientId"]
 
-        app_values = {
-            "AWS_PROFILE": resolved_profile,
-            "AWS_REGION": resolved_region,
-            "COGNITO_REGION": resolved_region,
-            "COGNITO_USER_POOL_ID": pool_id,
-            "COGNITO_APP_CLIENT_ID": client_id,
-            "COGNITO_CLIENT_NAME": app_name,
-            "COGNITO_CALLBACK_URL": callback_url,
-        }
-        if logout_url:
-            app_values["COGNITO_LOGOUT_URL"] = logout_url
-
-        app_context_name, app_legacy_names = _context_targets(
-            pool_id,
-            resolved_region,
-            pool_name=pool_name,
-            client_name=app_name,
-        )
-        _write_context(
-            app_context_name,
-            app_values,
-            legacy_names=app_legacy_names,
-            set_active=set_default,
-        )
-
-        if set_default:
-            pool_context_name, pool_legacy_names = _context_targets(
-                pool_id,
-                resolved_region,
-                pool_name=pool_name,
-            )
-            _write_context(pool_context_name, app_values, legacy_names=pool_legacy_names)
-
         ccyo_out.info(f"[green]✓[/green]  Created app client: {app_name} ({client_id})")
-        ccyo_out.info(f"[cyan]{app_context_name}[/cyan] in [dim]{_config_store_path()}[/dim]")
+        if set_default:
+            ccyo_out.info("[dim]Run daycog auth-config update if you want the config file to point at this app.[/dim]")
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
         raise typer.Exit(1)
@@ -1417,7 +1015,7 @@ def edit_app(
     scopes: Optional[str] = typer.Option(None, "--scopes", help="Comma-separated OAuth scopes"),
     idps: Optional[str] = typer.Option(None, "--idp", help="Comma-separated identity providers"),
     set_default: bool = typer.Option(
-        False, "--set-default", help="Also update the pool context and active Daycog context to this app"
+        False, "--set-default", help="Print a reminder to refresh the auth config file to this app"
     ),
 ) -> None:
     """Edit an existing app client in a pool."""
@@ -1460,42 +1058,13 @@ def edit_app(
         final_callback_urls = list(update_kwargs.get("CallbackURLs", []))
         final_logout_urls = list(update_kwargs.get("LogoutURLs", []))
 
-        app_values = {
-            "AWS_PROFILE": resolved_profile,
-            "AWS_REGION": resolved_region,
-            "COGNITO_REGION": resolved_region,
-            "COGNITO_USER_POOL_ID": pool_id,
-            "COGNITO_APP_CLIENT_ID": found["client_id"],
-            "COGNITO_CLIENT_NAME": final_name,
-        }
-        if final_callback_urls:
-            app_values["COGNITO_CALLBACK_URL"] = final_callback_urls[0]
-        if final_logout_urls:
-            app_values["COGNITO_LOGOUT_URL"] = final_logout_urls[0]
-
-        app_context_name, app_legacy_names = _context_targets(
-            pool_id,
-            resolved_region,
-            pool_name=pool_name,
-            client_name=final_name,
-        )
-        _write_context(
-            app_context_name,
-            app_values,
-            legacy_names=app_legacy_names,
-            set_active=set_default,
-        )
-
-        if set_default:
-            pool_context_name, pool_legacy_names = _context_targets(
-                pool_id,
-                resolved_region,
-                pool_name=pool_name,
-            )
-            _write_context(pool_context_name, app_values, legacy_names=pool_legacy_names)
-
         ccyo_out.info(f"[green]✓[/green]  Updated app client: {final_name} ({found['client_id']})")
-        ccyo_out.info(f"[cyan]{app_context_name}[/cyan] in [dim]{_config_store_path()}[/dim]")
+        if final_callback_urls:
+            ccyo_out.info(f"[dim]Callback URL: {final_callback_urls[0]}[/dim]")
+        if final_logout_urls:
+            ccyo_out.info(f"[dim]Logout URL: {final_logout_urls[0]}[/dim]")
+        if set_default:
+            ccyo_out.info("[dim]Run daycog auth-config update if you want the config file to point at this app.[/dim]")
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
         raise typer.Exit(1)
@@ -1510,7 +1079,7 @@ def remove_app(
     region: Optional[str] = typer.Option(None, "--region", help="AWS region to use"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
     delete_config: bool = typer.Option(
-        True, "--delete-config/--keep-config", help="Delete the app-scoped Daycog context"
+        True, "--delete-config/--keep-config", help="No-op compatibility flag; config files are not edited here"
     ),
 ) -> None:
     """Remove an app client from a pool."""
@@ -1539,16 +1108,8 @@ def remove_app(
         cognito.delete_user_pool_client(UserPoolId=pool_id, ClientId=found["client_id"])
         ccyo_out.info(f"[green]✓[/green]  Deleted app client: {found['client_name']} ({found['client_id']})")
 
-        app_context_name, app_legacy_names = _context_targets(
-            pool_id,
-            resolved_region,
-            pool_name=pool_name,
-            client_name=found["client_name"],
-        )
         if delete_config:
-            removed = _remove_contexts([app_context_name, *app_legacy_names])
-            for name in removed:
-                ccyo_out.info(f"[dim]Removed context: {name}[/dim]")
+            ccyo_out.info("[dim]Config files are no longer updated by remove-app; run daycog auth-config update if needed.[/dim]")
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
         raise typer.Exit(1)
@@ -1575,7 +1136,15 @@ def add_google_idp(
         ccyo_out.info("[red]✗[/red]  Provide one of: --app-name or --client-id")
         raise typer.Exit(1)
 
-    resolved_profile, resolved_region = _resolve_profile_region(profile, region)
+    runtime = _get_runtime_config(
+        profile=profile,
+        region=region,
+        require_config=True,
+        require_required_keys=True,
+        require_profile=True,
+    )
+    resolved_profile = runtime.require_aws_profile()
+    resolved_region = runtime.aws_region
     resolved_google_id, resolved_google_secret = _resolve_google_client_details(
         google_client_id=google_client_id,
         google_client_secret=google_client_secret,
@@ -1701,7 +1270,6 @@ def setup_with_google(
 ) -> None:
     """All-in-one setup: provision pool/app client and configure Google IdP."""
     resolved_client_name = client_name or f"{pool_name}-client"
-
     setup(
         pool_name=pool_name,
         client_name=resolved_client_name,
@@ -1728,19 +1296,30 @@ def setup_with_google(
         tags=tags,
     )
 
+    resolved_google_id, resolved_google_secret = _resolve_google_client_details(
+        google_client_id=google_client_id,
+        google_client_secret=google_client_secret,
+        google_client_json=google_client_json,
+    )
+
     add_google_idp(
         pool_name=pool_name,
         app_name=resolved_client_name,
         client_id=None,
         profile=profile,
         region=region,
-        google_client_id=google_client_id,
-        google_client_secret=google_client_secret,
-        google_client_json=google_client_json,
+        google_client_id=resolved_google_id,
+        google_client_secret=resolved_google_secret,
+        google_client_json=None,
         scopes=google_scopes,
     )
 
-    ccyo_out.info("[green]✓[/green]  Setup with Google IdP complete")
+    current_values = load_config_file(active_config_path(), require_required_keys=True)
+    current_values["GOOGLE_CLIENT_ID"] = resolved_google_id
+    current_values["GOOGLE_CLIENT_SECRET"] = resolved_google_secret
+    config_path = _write_effective_config(current_values)
+
+    ccyo_out.info(f"[green]✓[/green]  Setup with Google IdP complete: {config_path}")
 
 
 @cognito_app.command("delete-pool")
@@ -1798,13 +1377,6 @@ def delete_pool(
 
         cognito.delete_user_pool(UserPoolId=resolved_pool_id)
         ccyo_out.info(f"[green]✓[/green]  Deleted Cognito pool: {resolved_pool_name} ({resolved_pool_id})")
-        removed_contexts = _cleanup_pool_contexts(
-            resolved_pool_name,
-            resolved_region,
-            resolved_pool_id,
-        )
-        for name in removed_contexts:
-            ccyo_out.info(f"[dim]Removed context: {name}[/dim]")
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
         raise typer.Exit(1)
@@ -1817,17 +1389,11 @@ def fix_auth_flows():
     Fixes 'Auth flow not enabled for this client' error by enabling
     ALLOW_ADMIN_USER_PASSWORD_AUTH on the existing app client.
     """
-    _check_aws_profile()
-
-    # Get pool and client IDs from env or config
     pool_id = _get_pool_id()
     client_id = _get_client_id()
 
     try:
-        import boto3
-
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
+        cognito = _get_cognito_client()
 
         ccyo_out.info(f"[cyan]Updating app client {client_id}...[/cyan]")
 
@@ -1860,9 +1426,6 @@ def set_password(
     password: str = typer.Option(..., "--password", "-p", prompt="New password", hide_input=True, help="New password"),
 ):
     """Set password for a Cognito user."""
-    _check_aws_profile()
-
-    # Get pool ID from env or config
     pool_id = _get_pool_id()
 
     try:
@@ -1887,7 +1450,6 @@ def ensure_group(
     description: str = typer.Option("", "--description", help="Optional group description"),
 ):
     """Ensure a Cognito group exists in the configured pool."""
-    _check_aws_profile()
     pool_id = _get_pool_id()
 
     try:
@@ -1915,7 +1477,6 @@ def add_user_to_group(
     group_name: str = typer.Option(..., "--group", help="Target Cognito group"),
 ):
     """Add a user to a Cognito group."""
-    _check_aws_profile()
     pool_id = _get_pool_id()
 
     try:
@@ -1942,7 +1503,6 @@ def set_user_attributes(
     ),
 ):
     """Update Cognito user attributes such as custom:tenant_id or custom:roles."""
-    _check_aws_profile()
     pool_id = _get_pool_id()
     attributes = _parse_attributes(attribute)
     if not attributes:
@@ -1962,61 +1522,6 @@ def set_user_attributes(
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
         raise typer.Exit(1)
-
-
-def _get_pool_id() -> str:
-    """Get user pool ID from the config store.
-
-    Priority order:
-    1. Named config (if --config provided)
-    2. Active context from config store
-
-    Raises:
-        typer.Exit(1) if not configured.
-    """
-    if _config_name:
-        try:
-            config = CognitoConfig.from_env(_config_name)
-            return config.user_pool_id
-        except ValueError:
-            pass
-    else:
-        values = get_context_values()
-        pool_id = values.get("COGNITO_USER_POOL_ID")
-        if pool_id:
-            return pool_id
-
-    ccyo_out.info("[red]✗[/red]  Cognito User Pool ID not configured")
-    ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
-    raise typer.Exit(1)
-
-
-def _get_client_id() -> str:
-    """Get app client ID from the config store.
-
-    Priority order:
-    1. Named config (if --config provided)
-    2. Active context from config store
-
-    Raises:
-        typer.Exit(1) if not configured.
-    """
-    if _config_name:
-        try:
-            config = CognitoConfig.from_env(_config_name)
-            return config.app_client_id
-        except ValueError:
-            pass
-    else:
-        values = get_context_values()
-        client_id = values.get("COGNITO_APP_CLIENT_ID") or values.get("COGNITO_CLIENT_ID")
-        if client_id:
-            return client_id
-
-    ccyo_out.info("[red]✗[/red]  Cognito App Client ID not configured")
-    ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
-    raise typer.Exit(1)
-
 
 def _generate_temp_password() -> str:
     """Generate a secure temporary password."""
@@ -2053,7 +1558,6 @@ def add_user(
         ursa cognito add-user user@example.com --password MySecure123
         ursa cognito add-user user@example.com --no-verify
     """
-    _check_aws_profile()
     pool_id = _get_pool_id()
 
     try:
@@ -2109,7 +1613,6 @@ def list_users(
     limit: int = typer.Option(50, "--limit", "-l", help="Max users to list"),
 ):
     """List all Cognito users."""
-    _check_aws_profile()
     pool_id = _get_pool_id()
 
     try:
@@ -2164,17 +1667,14 @@ def export_users(
     output: str = typer.Option("cognito_users.log", "--output", "-o", help="Output file path"),
 ):
     """Export all Cognito users to a log file."""
-    _check_aws_profile()
     pool_id = _get_pool_id()
 
     try:
         import json
         from datetime import datetime, timezone
-
-        import boto3
-
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
+        runtime = _get_runtime_config(require_profile=True)
+        region = runtime.aws_region
+        cognito = _get_cognito_client()
 
         ccyo_out.info(f"[cyan]Exporting users from pool {pool_id}...[/cyan]")
 
@@ -2220,7 +1720,6 @@ def delete_user(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ):
     """Delete a single Cognito user."""
-    _check_aws_profile()
     pool_id = _get_pool_id()
 
     if not force:
@@ -2231,10 +1730,7 @@ def delete_user(
             return
 
     try:
-        import boto3
-
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
+        cognito = _get_cognito_client()
 
         cognito.admin_delete_user(UserPoolId=pool_id, Username=email)
         ccyo_out.info(f"[green]✓[/green]  Deleted user: {email}")
@@ -2249,7 +1745,6 @@ def delete_all_users(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ):
     """Delete ALL users from the Cognito pool. Use with caution!"""
-    _check_aws_profile()
     pool_id = _get_pool_id()
 
     if not force:
@@ -2260,10 +1755,7 @@ def delete_all_users(
             return
 
     try:
-        import boto3
-
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
+        cognito = _get_cognito_client()
 
         ccyo_out.info(f"[cyan]Deleting all users from pool {pool_id}...[/cyan]")
 
@@ -2293,26 +1785,12 @@ def teardown(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     """Delete the Cognito User Pool and all its users."""
-    _check_aws_profile()
-
     try:
         import boto3
-
-        region = _get_cognito_region()
-        cognito = boto3.client("cognito-idp", region_name=region)
-
-        # Get pool ID from config store or find by name
-        pool_id: Optional[str] = None
-
-        if _config_name:
-            try:
-                config = CognitoConfig.from_env(_config_name)
-                pool_id = config.user_pool_id
-            except ValueError:
-                pass
-        else:
-            values = get_context_values()
-            pool_id = values.get("COGNITO_USER_POOL_ID")
+        runtime = _get_runtime_config(require_profile=True)
+        session = boto3.Session(profile_name=runtime.require_aws_profile(), region_name=runtime.aws_region)
+        cognito = session.client("cognito-idp")
+        pool_id: Optional[str] = runtime.values.get("COGNITO_USER_POOL_ID")
 
         if not pool_id and pool_name:
             pools = cognito.list_user_pools(MaxResults=60)
@@ -2323,7 +1801,7 @@ def teardown(
 
         if not pool_id:
             ccyo_out.info("[red]✗[/red]  No pool ID found")
-            ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
+            ccyo_out.info("   Populate the active config file via [cyan]daycog setup[/cyan] or [cyan]daycog auth-config create[/cyan]")
             ccyo_out.info("   Or use --name to search by pool name")
             raise typer.Exit(1)
 
@@ -2344,8 +1822,7 @@ def teardown(
         ccyo_out.info(f"[cyan]Deleting pool {pool_id}...[/cyan]")
         cognito.delete_user_pool(UserPoolId=pool_id)
         ccyo_out.info(f"[green]✓[/green]  Deleted Cognito pool: {pool_name_actual} ({pool_id})")
-        ccyo_out.info("\n[yellow]Remember to remove the config context:[/yellow]")
-        ccyo_out.info(f"   [cyan]daycog config delete-context <context-name>[/cyan]")
+        ccyo_out.info("\n[yellow]Remember to refresh or remove the config file if it still points at this pool.[/yellow]")
 
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
@@ -2358,23 +1835,19 @@ def setup_google(
     google_client_secret: str = typer.Option(..., "--client-secret", help="Google OAuth2 client secret"),
     redirect_port: int = typer.Option(8000, "--port", "-p", help="Local server port for redirect URI"),
 ) -> None:
-    """Display environment variables for Google OAuth integration.
+    """Write Google OAuth credentials into the effective config file."""
+    try:
+        values = load_config_file(active_config_path(), require_required_keys=True)
+    except ConfigError as exc:
+        _handle_config_error(exc)
 
-    Generates the env var export commands needed to enable Google OAuth
-    with daylily-cognito. Does not store credentials — print only.
-    """
+    values["GOOGLE_CLIENT_ID"] = google_client_id
+    values["GOOGLE_CLIENT_SECRET"] = google_client_secret
+    config_path = _write_effective_config(values)
     redirect_uri = f"http://localhost:{redirect_port}/auth/google/callback"
 
     ccyo_out.info("\n[bold cyan]Google OAuth Configuration[/bold cyan]\n")
-    ccyo_out.info("Set these environment variables:\n")
-
-    if _config_name:
-        name_upper = _config_name.upper()
-        ccyo_out.info(f'  export DAYCOG_{name_upper}_GOOGLE_CLIENT_ID="{google_client_id}"')
-        ccyo_out.info(f'  export DAYCOG_{name_upper}_GOOGLE_CLIENT_SECRET="{google_client_secret}"')
-    else:
-        ccyo_out.info(f'  export GOOGLE_CLIENT_ID="{google_client_id}"')
-        ccyo_out.info(f'  export GOOGLE_CLIENT_SECRET="{google_client_secret}"')
+    ccyo_out.info(f"Wrote Google OAuth credentials to [cyan]{config_path}[/cyan]\n")
 
     ccyo_out.info("\n[dim]Redirect URI (register in Google Cloud Console):[/dim]")
     ccyo_out.info(f"  {redirect_uri}\n")
@@ -2388,11 +1861,12 @@ def setup_google(
     ccyo_out.info("[dim]    auto_create_cognito_user_from_google,[/dim]")
     ccyo_out.info("[dim])[/dim]\n")
 
-    ccyo_out.info("[green]✓[/green] Configuration displayed. Set the env vars above to enable Google OAuth.\n")
+    ccyo_out.info("[green]✓[/green] Google OAuth credentials stored in the active config file.\n")
 
 
 from cli_core_yo.registry import CommandRegistry
 from cli_core_yo.spec import CliSpec
+
 
 def register(registry: CommandRegistry, spec: CliSpec) -> None:
     """Register commands for the daycog CLI."""

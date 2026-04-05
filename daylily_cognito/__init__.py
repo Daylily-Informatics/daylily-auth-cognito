@@ -6,8 +6,8 @@ for FastAPI + Jinja2 web applications.
 Example usage:
     from daylily_cognito import CognitoConfig, CognitoAuth, create_auth_dependency
 
-    # Load config from environment
-    config = CognitoConfig.from_env("default")
+    # Load config from the canonical daycog config file
+    config = CognitoConfig.from_file("~/.config/daycog/config.yaml")
 
     # Create auth handler
     auth = CognitoAuth(
