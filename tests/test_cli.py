@@ -145,7 +145,7 @@ class TestRootAndConfigFileSelection:
         result = runner.invoke(app, ["--config", str(cfg), "auth-config", "print"])
 
         assert result.exit_code == 1
-        assert "Legacy context-store YAML is not supported" in result.output
+        assert "Context-store YAML format is not supported" in result.output
 
 
 class TestStatusAndSetup:

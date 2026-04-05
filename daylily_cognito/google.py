@@ -237,7 +237,7 @@ def auto_create_cognito_user_from_google(
         raise ValueError("Google userinfo missing 'sub' field")
 
     # Validate email domain before any user lookup or creation.
-    # If auth.settings is None, this is a no-op (backward compatible).
+    # If auth.settings is None, this is a no-op.
     # If domain is blocked, raises HTTPException(403).
     if hasattr(auth, "_validate_email_domain"):
         auth._validate_email_domain(email)

@@ -194,13 +194,13 @@ def _validate_payload(payload: Any, *, require_required_keys: bool) -> list[str]
         return ["Config file must contain a top-level mapping."]
 
     keys = {str(key) for key in payload.keys()}
-    legacy_keys = {"contexts", "active_context"} & keys
+    rejected_keys = {"contexts", "active_context"} & keys
     errors: list[str] = []
 
-    if legacy_keys:
-        errors.append("Legacy context-store YAML is not supported; use a flat config file instead.")
+    if rejected_keys:
+        errors.append("Context-store YAML format is not supported; use a flat config file instead.")
 
-    unknown_keys = sorted(keys - CONFIG_KEYS - legacy_keys)
+    unknown_keys = sorted(keys - CONFIG_KEYS - rejected_keys)
     if unknown_keys:
         errors.append(f"Unknown config keys: {', '.join(unknown_keys)}")
 

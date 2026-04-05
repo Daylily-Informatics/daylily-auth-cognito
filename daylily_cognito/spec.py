@@ -38,11 +38,11 @@ def _validate_config_template(content: str) -> list[str]:
         return ["Config file must contain a top-level mapping."]
 
     keys = {str(key) for key in payload.keys()}
-    legacy_keys = {"contexts", "active_context"} & keys
-    if legacy_keys:
-        errors.append("Legacy context-store YAML is not supported; use a flat config file instead.")
+    rejected_keys = {"contexts", "active_context"} & keys
+    if rejected_keys:
+        errors.append("Context-store YAML format is not supported; use a flat config file instead.")
 
-    unknown_keys = sorted(keys - _ALLOWED_KEYS - legacy_keys)
+    unknown_keys = sorted(keys - _ALLOWED_KEYS - rejected_keys)
     if unknown_keys:
         errors.append(f"Unknown config keys: {', '.join(unknown_keys)}")
 

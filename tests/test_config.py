@@ -51,7 +51,7 @@ AWS_PROFILE: dev-profile
     def test_rejects_legacy_context_store_yaml(self) -> None:
         errors = validate_config_text("contexts: {}\nactive_context: dev\n", require_required_keys=False)
 
-        assert errors == ["Legacy context-store YAML is not supported; use a flat config file instead."]
+        assert errors == ["Context-store YAML format is not supported; use a flat config file instead."]
 
     def test_rejects_unknown_and_non_scalar_keys(self) -> None:
         content = """
