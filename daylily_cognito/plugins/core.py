@@ -251,19 +251,25 @@ def _resolve_google_client_details(
             ccyo_out.info(f"[red]✗[/red]  Failed to read Google client JSON: {e}")
             raise typer.Exit(1)
 
-    resolved_id = resolved_id or os.environ.get("GOOGLE_CLIENT_ID")
-    resolved_secret = resolved_secret or os.environ.get("GOOGLE_CLIENT_SECRET")
-
-    if _config_name:
-        name_upper = _config_name.upper()
-        resolved_id = resolved_id or os.environ.get(f"DAYCOG_{name_upper}_GOOGLE_CLIENT_ID")
-        resolved_secret = resolved_secret or os.environ.get(f"DAYCOG_{name_upper}_GOOGLE_CLIENT_SECRET")
+    # Fall back to config store for Google OAuth values
+    if not resolved_id or not resolved_secret:
+        if _config_name:
+            try:
+                cfg = CognitoConfig.from_env(_config_name)
+                resolved_id = resolved_id or cfg.google_client_id
+                resolved_secret = resolved_secret or cfg.google_client_secret
+            except ValueError:
+                pass
+        else:
+            values = get_context_values()
+            resolved_id = resolved_id or values.get("GOOGLE_CLIENT_ID")
+            resolved_secret = resolved_secret or values.get("GOOGLE_CLIENT_SECRET")
 
     if not resolved_id or not resolved_secret:
         ccyo_out.info("[red]✗[/red]  Google OAuth client details missing")
         ccyo_out.info(
             "   Provide --google-client-id/--google-client-secret, or --google-client-json, "
-            "or set GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET"
+            "or run [cyan]daycog setup[/cyan] with Google config"
         )
         raise typer.Exit(1)
 
@@ -489,7 +495,7 @@ def _print_context(name: str, *, as_json: bool = False) -> None:
     """Print a Daycog context name and contents from the YAML config store."""
     payload = _context_payload(name)
     if as_json:
-        print(json=json.dumps(payload))
+        ccyo_out.emit_json(payload)
         return
 
     ccyo_out.info(f"{payload['config_store_path']} :: {name}")
@@ -612,32 +618,13 @@ def _collect_known_cli_values() -> Dict[str, str]:
         except ValueError:
             pass
 
+    # AWS_PROFILE and AWS_REGION are legitimate boto3 SDK env vars that
+    # boto3 reads from os.environ for credential/region selection.
     env = os.environ
     if env.get("AWS_PROFILE"):
         values["AWS_PROFILE"] = env["AWS_PROFILE"]
     if env.get("AWS_REGION"):
         values["AWS_REGION"] = env["AWS_REGION"]
-    if env.get("COGNITO_REGION"):
-        values["COGNITO_REGION"] = env["COGNITO_REGION"]
-    if env.get("COGNITO_USER_POOL_ID"):
-        values["COGNITO_USER_POOL_ID"] = env["COGNITO_USER_POOL_ID"]
-    if env.get("COGNITO_CLIENT_NAME"):
-        values["COGNITO_CLIENT_NAME"] = env["COGNITO_CLIENT_NAME"]
-    if env.get("COGNITO_CALLBACK_URL"):
-        values["COGNITO_CALLBACK_URL"] = env["COGNITO_CALLBACK_URL"]
-    if env.get("COGNITO_LOGOUT_URL"):
-        values["COGNITO_LOGOUT_URL"] = env["COGNITO_LOGOUT_URL"]
-
-    app_client_id = env.get("COGNITO_APP_CLIENT_ID") or env.get("COGNITO_CLIENT_ID")
-    if app_client_id:
-        values["COGNITO_APP_CLIENT_ID"] = app_client_id
-
-    if env.get("GOOGLE_CLIENT_ID"):
-        values["GOOGLE_CLIENT_ID"] = env["GOOGLE_CLIENT_ID"]
-    if env.get("GOOGLE_CLIENT_SECRET"):
-        values["GOOGLE_CLIENT_SECRET"] = env["GOOGLE_CLIENT_SECRET"]
-    if env.get("COGNITO_DOMAIN"):
-        values["COGNITO_DOMAIN"] = env["COGNITO_DOMAIN"]
 
     return values
 
@@ -651,16 +638,14 @@ def _check_aws_profile() -> None:
 
 
 def _get_cognito_region() -> str:
-    """Get the AWS region for Cognito operations.
+    """Get the AWS region for Cognito operations from the config store.
 
     Priority order:
     1. Named config (if --config provided)
-    2. COGNITO_REGION environment variable
-    3. AWS_REGION environment variable
-    4. Fallback to 'us-west-2'
+    2. Active context from config store
 
-    Returns:
-        AWS region string (e.g., 'us-west-2')
+    Raises:
+        typer.Exit(1) if not configured.
     """
     if _config_name:
         try:
@@ -668,8 +653,15 @@ def _get_cognito_region() -> str:
             return config.region
         except ValueError:
             pass
+    else:
+        values = get_context_values()
+        region = values.get("COGNITO_REGION") or values.get("AWS_REGION")
+        if region:
+            return region
 
-    return "us-west-2"
+    ccyo_out.info("[red]✗[/red]  AWS region not configured")
+    ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
+    raise typer.Exit(1)
 
 
 def _get_cognito_client() -> Any:
@@ -716,9 +708,9 @@ def status() -> None:
         table.add_column("Value")
         table.add_column("Source", style="dim")
 
-        # Determine source based on --config or env vars
+        # Determine source from config store
+        source = f"config:{_config_name}" if _config_name else "config"
         if _config_name:
-            source = f"config:{_config_name}"
             try:
                 config = CognitoConfig.from_env(_config_name)
                 pool_id = config.user_pool_id
@@ -727,10 +719,9 @@ def status() -> None:
                 pool_id = ""
                 client_id = ""
         else:
-            # Legacy env var lookup
-            pool_id = os.environ.get("COGNITO_USER_POOL_ID", "")
-            client_id = os.environ.get("COGNITO_APP_CLIENT_ID") or os.environ.get("COGNITO_CLIENT_ID", "")
-            source = "env"
+            values = get_context_values()
+            pool_id = values.get("COGNITO_USER_POOL_ID", "")
+            client_id = values.get("COGNITO_APP_CLIENT_ID") or values.get("COGNITO_CLIENT_ID", "")
 
         table.add_row("Region", region, source if _config_name else "")
 
@@ -751,12 +742,11 @@ def status() -> None:
         else:
             table.add_row("App Client ID", "[dim]Not configured[/dim]", "")
 
-        ccyo_out.info(table)
+        ccyo_out.print_text(table)
 
         if not pool_id or not client_id:
             ccyo_out.info("\n[yellow]⚠[/yellow]  Cognito not fully configured")
-            ccyo_out.info("   Run: [cyan]daycog setup[/cyan]")
-            ccyo_out.info("   Or set env vars: COGNITO_USER_POOL_ID, COGNITO_APP_CLIENT_ID")
+            ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
 
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
@@ -977,18 +967,10 @@ def setup(
         if resolved_cognito_domain:
             ccyo_out.info(f"   [cyan]COGNITO_DOMAIN={resolved_cognito_domain}[/cyan]")
         if print_exports:
-            ccyo_out.info("\n[bold]Shell exports:[/bold]")
+            # Only AWS SDK env vars — Cognito config comes from the config store
+            ccyo_out.info("\n[bold]Shell exports (boto3 SDK only):[/bold]")
             ccyo_out.info(f'export AWS_PROFILE="{resolved_profile}"')
             ccyo_out.info(f'export AWS_REGION="{resolved_region}"')
-            ccyo_out.info(f'export COGNITO_REGION="{resolved_region}"')
-            ccyo_out.info(f'export COGNITO_USER_POOL_ID="{pool_id}"')
-            ccyo_out.info(f'export COGNITO_APP_CLIENT_ID="{client_id}"')
-            ccyo_out.info(f'export COGNITO_CALLBACK_URL="{resolved_callback_url}"')
-            ccyo_out.info(f'export COGNITO_CLIENT_NAME="{resolved_client_name}"')
-            if logout_url:
-                ccyo_out.info(f'export COGNITO_LOGOUT_URL="{logout_url}"')
-            if resolved_cognito_domain:
-                ccyo_out.info(f'export COGNITO_DOMAIN="{resolved_cognito_domain}"')
 
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
@@ -1291,7 +1273,7 @@ def list_pools(
                 table.add_row(pool.get("Name", ""), pool.get("Id", ""))
                 count += 1
 
-        ccyo_out.info(table)
+        ccyo_out.print_text(table)
         ccyo_out.info(f"\n[dim]Total: {count} pools[/dim]")
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
@@ -1321,7 +1303,7 @@ def list_apps(
         for client in clients:
             table.add_row(client.get("ClientName", ""), client.get("ClientId", ""))
 
-        ccyo_out.info(table)
+        ccyo_out.print_text(table)
         ccyo_out.info(f"\n[dim]Total: {len(clients)} app clients[/dim]")
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")
@@ -1983,49 +1965,56 @@ def set_user_attributes(
 
 
 def _get_pool_id() -> str:
-    """Get user pool ID from named config or env var.
+    """Get user pool ID from the config store.
 
     Priority order:
     1. Named config (if --config provided)
-    2. COGNITO_USER_POOL_ID environment variable
+    2. Active context from config store
 
     Raises:
-        typer.Exit(1) if not configured anywhere.
+        typer.Exit(1) if not configured.
     """
-    # Check named config first
     if _config_name:
         try:
             config = CognitoConfig.from_env(_config_name)
             return config.user_pool_id
         except ValueError:
             pass
+    else:
+        values = get_context_values()
+        pool_id = values.get("COGNITO_USER_POOL_ID")
+        if pool_id:
+            return pool_id
 
-    # Not configured anywhere
     ccyo_out.info("[red]✗[/red]  Cognito User Pool ID not configured")
-    ccyo_out.info("   Or use --config NAME with DAYCOG_<NAME>_USER_POOL_ID")
+    ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
     raise typer.Exit(1)
 
 
 def _get_client_id() -> str:
-    """Get app client ID from named config or env var.
+    """Get app client ID from the config store.
 
     Priority order:
     1. Named config (if --config provided)
+    2. Active context from config store
 
     Raises:
-        typer.Exit(1) if not configured anywhere.
+        typer.Exit(1) if not configured.
     """
-    # Check named config first
     if _config_name:
         try:
             config = CognitoConfig.from_env(_config_name)
             return config.app_client_id
         except ValueError:
             pass
+    else:
+        values = get_context_values()
+        client_id = values.get("COGNITO_APP_CLIENT_ID") or values.get("COGNITO_CLIENT_ID")
+        if client_id:
+            return client_id
 
-    # Not configured anywhere
     ccyo_out.info("[red]✗[/red]  Cognito App Client ID not configured")
-    ccyo_out.info("   Or use --config NAME with DAYCOG_<NAME>_APP_CLIENT_ID")
+    ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
     raise typer.Exit(1)
 
 
@@ -2162,7 +2151,7 @@ def list_users(
                 table.add_row(email, customer_id, status_color, str(created), enabled)
                 user_count += 1
 
-        ccyo_out.info(table)
+        ccyo_out.print_text(table)
         ccyo_out.info(f"\n[dim]Total: {user_count} users[/dim]")
 
     except Exception as e:
@@ -2312,7 +2301,7 @@ def teardown(
         region = _get_cognito_region()
         cognito = boto3.client("cognito-idp", region_name=region)
 
-        # Get pool ID from named config, env, or find by name
+        # Get pool ID from config store or find by name
         pool_id: Optional[str] = None
 
         if _config_name:
@@ -2321,9 +2310,9 @@ def teardown(
                 pool_id = config.user_pool_id
             except ValueError:
                 pass
-
-        if not pool_id:
-            pool_id = os.environ.get("COGNITO_USER_POOL_ID")
+        else:
+            values = get_context_values()
+            pool_id = values.get("COGNITO_USER_POOL_ID")
 
         if not pool_id and pool_name:
             pools = cognito.list_user_pools(MaxResults=60)
@@ -2334,8 +2323,7 @@ def teardown(
 
         if not pool_id:
             ccyo_out.info("[red]✗[/red]  No pool ID found")
-            ccyo_out.info("   Set via environment: [cyan]export COGNITO_USER_POOL_ID=...[/cyan]")
-            ccyo_out.info("   Or use --config NAME with DAYCOG_<NAME>_USER_POOL_ID")
+            ccyo_out.info("   Run [cyan]daycog setup[/cyan] or use [cyan]--config NAME[/cyan]")
             ccyo_out.info("   Or use --name to search by pool name")
             raise typer.Exit(1)
 
@@ -2356,9 +2344,8 @@ def teardown(
         ccyo_out.info(f"[cyan]Deleting pool {pool_id}...[/cyan]")
         cognito.delete_user_pool(UserPoolId=pool_id)
         ccyo_out.info(f"[green]✓[/green]  Deleted Cognito pool: {pool_name_actual} ({pool_id})")
-        ccyo_out.info("\n[yellow]Remember to unset environment variables:[/yellow]")
-        ccyo_out.info("   unset COGNITO_USER_POOL_ID")
-        ccyo_out.info("   unset COGNITO_APP_CLIENT_ID")
+        ccyo_out.info("\n[yellow]Remember to remove the config context:[/yellow]")
+        ccyo_out.info(f"   [cyan]daycog config delete-context <context-name>[/cyan]")
 
     except Exception as e:
         ccyo_out.info(f"[red]✗[/red]  Error: {e}")

@@ -11,18 +11,38 @@ from unittest import mock
 import typer.testing
 import yaml
 
-from daylily_cognito.cli import cognito_app
+from daylily_cognito.plugins.core import cognito_app
 
 runner = typer.testing.CliRunner()
 
-# Common env vars for tests (all lazy-imported boto3 calls need to be mocked separately)
+# Env vars that are still legitimately env-based (AWS SDK credential selection)
+_PROFILE_ENV = {"AWS_PROFILE": "test-profile"}
+
+# Legacy alias — setup commands still need AWS_PROFILE + AWS_REGION in the env
 _BASE_ENV = {
     "AWS_PROFILE": "test-profile",
     "AWS_REGION": "us-west-2",
+}
+
+# Config store values for tests (replaces env-var-based config)
+_BASE_CONFIG = {
     "COGNITO_USER_POOL_ID": "us-west-2_TestPool",
     "COGNITO_APP_CLIENT_ID": "test-client-id",
     "COGNITO_REGION": "us-west-2",
+    "AWS_REGION": "us-west-2",
+    "AWS_PROFILE": "test-profile",
 }
+
+_ACTIVE_CTX = "test-context"
+
+
+def _setup_test_config(tmp_path, values=None, active_context=_ACTIVE_CTX):
+    """Write a config store with test defaults and return a Path.home patcher."""
+    vals = dict(_BASE_CONFIG)
+    if values:
+        vals.update(values)
+    _write_store(tmp_path, contexts={active_context: vals}, active_context=active_context)
+    return mock.patch("pathlib.Path.home", return_value=tmp_path)
 
 
 def _mock_cognito_client() -> mock.MagicMock:
@@ -164,12 +184,13 @@ def _app_file(tmp_path, pool_key: str, region: str, client_name: str) -> _Contex
 
 
 class TestStatusCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_status_shows_pool_info(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_status_shows_pool_info(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mock_boto_client.return_value = mc
-        result = runner.invoke(cognito_app, ["status"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["status"])
         assert result.exit_code == 0
         assert "us-west-2_TestPool" in result.output
 
@@ -245,13 +266,10 @@ class TestSetupCommand:
                 ["setup", "--name", "my-pool", "--profile", "flag-profile", "--region", "us-east-1", "--print-exports"],
             )
         assert result.exit_code == 0
+        # Only AWS SDK env vars are exported — Cognito config comes from the store
         assert 'export AWS_PROFILE="flag-profile"' in result.output
         assert 'export AWS_REGION="us-east-1"' in result.output
-        assert 'export COGNITO_REGION="us-east-1"' in result.output
-        assert 'export COGNITO_USER_POOL_ID="us-west-2_New"' in result.output
-        assert 'export COGNITO_APP_CLIENT_ID="new-cid"' in result.output
-        assert 'export COGNITO_CALLBACK_URL="http://localhost:8001/auth/callback"' in result.output
-        assert 'export COGNITO_DOMAIN="my-pool.auth.us-east-1.amazoncognito.com"' in result.output
+        assert "export COGNITO_" not in result.output
 
     @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
     @mock.patch("boto3.client")
@@ -1189,12 +1207,7 @@ class TestAddGoogleIdpCommand:
 
     @mock.patch.dict(
         os.environ,
-        {
-            "AWS_PROFILE": "p",
-            "AWS_REGION": "us-east-1",
-            "GOOGLE_CLIENT_ID": "env-gid",
-            "GOOGLE_CLIENT_SECRET": "env-secret",
-        },
+        {"AWS_PROFILE": "p", "AWS_REGION": "us-east-1"},
         clear=True,
     )
     @mock.patch("boto3.Session")
@@ -1229,6 +1242,10 @@ class TestAddGoogleIdpCommand:
                 "pool-a",
                 "--app-name",
                 "web-app",
+                "--google-client-id",
+                "env-gid",
+                "--google-client-secret",
+                "env-secret",
             ],
         )
         assert result.exit_code == 0
@@ -1453,9 +1470,9 @@ class TestDeletePoolCommand:
 
 
 class TestFixAuthFlowsCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_fix_auth_flows_updates_client(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_fix_auth_flows_updates_client(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mc.describe_user_pool_client.return_value = {
             "UserPoolClient": {
@@ -1471,7 +1488,8 @@ class TestFixAuthFlowsCommand:
             }
         }
         mock_boto_client.return_value = mc
-        result = runner.invoke(cognito_app, ["fix-auth-flows"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["fix-auth-flows"])
         assert result.exit_code == 0
         mc.update_user_pool_client.assert_called_once()
         kwargs = mc.update_user_pool_client.call_args.kwargs
@@ -1488,12 +1506,13 @@ class TestFixAuthFlowsCommand:
 
 
 class TestSetPasswordCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_set_password_calls_admin(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_set_password_calls_admin(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mock_boto_client.return_value = mc
-        result = runner.invoke(cognito_app, ["set-password", "--email", "u@x.com", "--password", "P@ss1234"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["set-password", "--email", "u@x.com", "--password", "P@ss1234"])
         assert result.exit_code == 0
         mc.admin_set_user_password.assert_called_once()
         assert "u@x.com" in result.output
@@ -1505,16 +1524,17 @@ class TestSetPasswordCommand:
 
 
 class TestEnsureGroupCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_ensure_group_creates_missing_group(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_ensure_group_creates_missing_group(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         paginator = mock.MagicMock()
         paginator.paginate.return_value = [{"Groups": []}]
         mc.get_paginator.return_value = paginator
         mock_boto_client.return_value = mc
 
-        result = runner.invoke(cognito_app, ["ensure-group", "lsmc-admins", "--description", "Admins"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["ensure-group", "lsmc-admins", "--description", "Admins"])
 
         assert result.exit_code == 0
         mc.create_group.assert_called_once_with(
@@ -1524,16 +1544,17 @@ class TestEnsureGroupCommand:
         )
         assert "Created group" in result.output
 
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_ensure_group_noops_when_group_exists(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_ensure_group_noops_when_group_exists(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         paginator = mock.MagicMock()
         paginator.paginate.return_value = [{"Groups": [{"GroupName": "lsmc-admins"}]}]
         mc.get_paginator.return_value = paginator
         mock_boto_client.return_value = mc
 
-        result = runner.invoke(cognito_app, ["ensure-group", "lsmc-admins"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["ensure-group", "lsmc-admins"])
 
         assert result.exit_code == 0
         mc.create_group.assert_not_called()
@@ -1546,16 +1567,17 @@ class TestEnsureGroupCommand:
 
 
 class TestAddUserToGroupCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_add_user_to_group_calls_admin_api(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_add_user_to_group_calls_admin_api(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mock_boto_client.return_value = mc
 
-        result = runner.invoke(
-            cognito_app,
-            ["add-user-to-group", "--email", "new@example.com", "--group", "lsmc-admins"],
-        )
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(
+                cognito_app,
+                ["add-user-to-group", "--email", "new@example.com", "--group", "lsmc-admins"],
+            )
 
         assert result.exit_code == 0
         mc.admin_add_user_to_group.assert_called_once_with(
@@ -1572,24 +1594,25 @@ class TestAddUserToGroupCommand:
 
 
 class TestSetUserAttributesCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_set_user_attributes_updates_attributes(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_set_user_attributes_updates_attributes(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mock_boto_client.return_value = mc
 
-        result = runner.invoke(
-            cognito_app,
-            [
-                "set-user-attributes",
-                "--email",
-                "new@example.com",
-                "--attribute",
-                "custom:tenant_id=00000000-0000-0000-0000-000000000001",
-                "--attribute",
-                "custom:roles=ADMIN,INTERNAL_USER",
-            ],
-        )
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(
+                cognito_app,
+                [
+                    "set-user-attributes",
+                    "--email",
+                    "new@example.com",
+                    "--attribute",
+                    "custom:tenant_id=00000000-0000-0000-0000-000000000001",
+                    "--attribute",
+                    "custom:roles=ADMIN,INTERNAL_USER",
+                ],
+            )
 
         assert result.exit_code == 0
         mc.admin_update_user_attributes.assert_called_once_with(
@@ -1602,9 +1625,10 @@ class TestSetUserAttributesCommand:
         )
         assert "Updated attributes" in result.output
 
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
-    def test_set_user_attributes_requires_attribute(self) -> None:
-        result = runner.invoke(cognito_app, ["set-user-attributes", "--email", "new@example.com"])
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
+    def test_set_user_attributes_requires_attribute(self, tmp_path) -> None:
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["set-user-attributes", "--email", "new@example.com"])
         assert result.exit_code != 0
         assert "Provide at least one --attribute" in result.output
 
@@ -1615,12 +1639,13 @@ class TestSetUserAttributesCommand:
 
 
 class TestAddUserCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_add_user_creates_user(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_add_user_creates_user(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mock_boto_client.return_value = mc
-        result = runner.invoke(cognito_app, ["add-user", "new@example.com", "--password", "Secure1234"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["add-user", "new@example.com", "--password", "Secure1234"])
         assert result.exit_code == 0
         mc.admin_create_user.assert_called_once()
         assert "new@example.com" in result.output
@@ -1632,9 +1657,9 @@ class TestAddUserCommand:
 
 
 class TestListUsersCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_list_users_shows_table(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_list_users_shows_table(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         # Override paginator to return one user
         mock_pag = mock.MagicMock()
@@ -1653,7 +1678,8 @@ class TestListUsersCommand:
         ]
         mc.get_paginator.return_value = mock_pag
         mock_boto_client.return_value = mc
-        result = runner.invoke(cognito_app, ["list-users"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["list-users"])
         assert result.exit_code == 0
         assert "a@x.com" in result.output
 
@@ -1664,7 +1690,7 @@ class TestListUsersCommand:
 
 
 class TestExportCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
     def test_export_writes_file(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
@@ -1687,7 +1713,8 @@ class TestExportCommand:
         mock_boto_client.return_value = mc
 
         out_file = str(tmp_path / "export.json")
-        result = runner.invoke(cognito_app, ["export", "--output", out_file])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["export", "--output", out_file])
         assert result.exit_code == 0
         data = json.loads(open(out_file).read())
         assert data["user_count"] == 1
@@ -1700,12 +1727,13 @@ class TestExportCommand:
 
 
 class TestDeleteUserCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_delete_user_with_force(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_delete_user_with_force(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mock_boto_client.return_value = mc
-        result = runner.invoke(cognito_app, ["delete-user", "--email", "u@x.com", "--force"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["delete-user", "--email", "u@x.com", "--force"])
         assert result.exit_code == 0
         mc.admin_delete_user.assert_called_once()
         assert "Deleted" in result.output
@@ -1717,15 +1745,16 @@ class TestDeleteUserCommand:
 
 
 class TestDeleteAllUsersCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_delete_all_users_with_force(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_delete_all_users_with_force(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mock_pag = mock.MagicMock()
         mock_pag.paginate.return_value = [{"Users": [{"Username": "u1@x.com"}, {"Username": "u2@x.com"}]}]
         mc.get_paginator.return_value = mock_pag
         mock_boto_client.return_value = mc
-        result = runner.invoke(cognito_app, ["delete-all-users", "--force"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["delete-all-users", "--force"])
         assert result.exit_code == 0
         assert mc.admin_delete_user.call_count == 2
 
@@ -1736,12 +1765,13 @@ class TestDeleteAllUsersCommand:
 
 
 class TestTeardownCommand:
-    @mock.patch.dict(os.environ, _BASE_ENV, clear=False)
+    @mock.patch.dict(os.environ, _PROFILE_ENV, clear=False)
     @mock.patch("boto3.client")
-    def test_teardown_with_force(self, mock_boto_client: mock.MagicMock) -> None:
+    def test_teardown_with_force(self, mock_boto_client: mock.MagicMock, tmp_path) -> None:
         mc = _mock_cognito_client()
         mock_boto_client.return_value = mc
-        result = runner.invoke(cognito_app, ["teardown", "--force"])
+        with _setup_test_config(tmp_path):
+            result = runner.invoke(cognito_app, ["teardown", "--force"])
         assert result.exit_code == 0
         mc.delete_user_pool.assert_called_once_with(UserPoolId="us-west-2_TestPool")
 

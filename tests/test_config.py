@@ -5,8 +5,19 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 
 from daylily_cognito.config import CognitoConfig
+
+
+def _write_config_store(tmp_path, contexts, active_context=""):
+    """Write a config YAML store under tmp_path/.config/daycog/."""
+    cfg_dir = tmp_path / ".config" / "daycog"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"contexts": contexts}
+    if active_context:
+        payload["active_context"] = active_context
+    (cfg_dir / "config.yaml").write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 class TestCognitoConfigValidate:
@@ -51,15 +62,19 @@ class TestCognitoConfigValidate:
 class TestCognitoConfigFromEnv:
     """Tests for CognitoConfig.from_env()."""
 
-    def test_from_env_success(self) -> None:
-        """Loads config from namespaced env vars."""
-        env = {
-            "DAYCOG_PROD_REGION": "us-east-1",
-            "DAYCOG_PROD_USER_POOL_ID": "us-east-1_pool",
-            "DAYCOG_PROD_APP_CLIENT_ID": "client_prod",
-            "DAYCOG_PROD_AWS_PROFILE": "prod-profile",
-        }
-        with mock.patch.dict(os.environ, env, clear=True):
+    def test_from_env_success(self, tmp_path) -> None:
+        """Loads config from the config store context."""
+        _write_config_store(tmp_path, contexts={
+            "PROD": {
+                "COGNITO_REGION": "us-east-1",
+                "COGNITO_USER_POOL_ID": "us-east-1_pool",
+                "COGNITO_APP_CLIENT_ID": "client_prod",
+                "AWS_PROFILE": "prod-profile",
+            }
+        })
+        # Clear AWS_PROFILE from env so the config store value wins
+        with mock.patch("pathlib.Path.home", return_value=tmp_path), \
+             mock.patch.dict(os.environ, {}, clear=True):
             config = CognitoConfig.from_env("PROD")
 
         assert config.name == "PROD"
@@ -68,38 +83,46 @@ class TestCognitoConfigFromEnv:
         assert config.app_client_id == "client_prod"
         assert config.aws_profile == "prod-profile"
 
-    def test_from_env_missing_vars(self) -> None:
-        """Missing env vars raises ValueError with var names."""
-        env = {"DAYCOG_TEST_REGION": "us-west-2"}
-        with mock.patch.dict(os.environ, env, clear=True):
+    def test_from_env_missing_vars(self, tmp_path) -> None:
+        """Missing config values raises ValueError."""
+        _write_config_store(tmp_path, contexts={
+            "TEST": {"COGNITO_REGION": "us-west-2"}
+        })
+        with mock.patch("pathlib.Path.home", return_value=tmp_path):
             with pytest.raises(ValueError) as exc_info:
                 CognitoConfig.from_env("TEST")
         assert "DAYCOG_TEST_USER_POOL_ID" in str(exc_info.value)
         assert "DAYCOG_TEST_APP_CLIENT_ID" in str(exc_info.value)
 
-    def test_from_env_custom_prefix(self) -> None:
-        """Custom prefix works."""
-        env = {
-            "MYCOG_DEV_REGION": "eu-west-1",
-            "MYCOG_DEV_USER_POOL_ID": "eu-west-1_dev",
-            "MYCOG_DEV_APP_CLIENT_ID": "client_dev",
-        }
-        with mock.patch.dict(os.environ, env, clear=True):
+    def test_from_env_custom_prefix(self, tmp_path) -> None:
+        """Custom prefix works (still reads from config store)."""
+        _write_config_store(tmp_path, contexts={
+            "DEV": {
+                "COGNITO_REGION": "eu-west-1",
+                "COGNITO_USER_POOL_ID": "eu-west-1_dev",
+                "COGNITO_APP_CLIENT_ID": "client_dev",
+            }
+        })
+        with mock.patch("pathlib.Path.home", return_value=tmp_path):
             config = CognitoConfig.from_env("DEV", prefix="MYCOG")
 
         assert config.region == "eu-west-1"
 
-    def test_from_env_multi_config_isolation(self) -> None:
+    def test_from_env_multi_config_isolation(self, tmp_path) -> None:
         """Two configs loaded concurrently don't cross-talk."""
-        env = {
-            "DAYCOG_A_REGION": "us-west-2",
-            "DAYCOG_A_USER_POOL_ID": "pool_a",
-            "DAYCOG_A_APP_CLIENT_ID": "client_a",
-            "DAYCOG_B_REGION": "eu-central-1",
-            "DAYCOG_B_USER_POOL_ID": "pool_b",
-            "DAYCOG_B_APP_CLIENT_ID": "client_b",
-        }
-        with mock.patch.dict(os.environ, env, clear=True):
+        _write_config_store(tmp_path, contexts={
+            "A": {
+                "COGNITO_REGION": "us-west-2",
+                "COGNITO_USER_POOL_ID": "pool_a",
+                "COGNITO_APP_CLIENT_ID": "client_a",
+            },
+            "B": {
+                "COGNITO_REGION": "eu-central-1",
+                "COGNITO_USER_POOL_ID": "pool_b",
+                "COGNITO_APP_CLIENT_ID": "client_b",
+            },
+        })
+        with mock.patch("pathlib.Path.home", return_value=tmp_path):
             config_a = CognitoConfig.from_env("A")
             config_b = CognitoConfig.from_env("B")
 
@@ -109,62 +132,3 @@ class TestCognitoConfigFromEnv:
         assert config_b.user_pool_id == "pool_b"
 
 
-class TestCognitoConfigFromLegacyEnv:
-    """Tests for CognitoConfig.from_legacy_env()."""
-
-    def test_from_legacy_env_success(self) -> None:
-        """Loads config from legacy COGNITO_* env vars."""
-        env = {
-            "COGNITO_REGION": "us-west-2",
-            "COGNITO_USER_POOL_ID": "us-west-2_legacy",
-            "COGNITO_APP_CLIENT_ID": "client_legacy",
-            "AWS_PROFILE": "legacy-profile",
-        }
-        with mock.patch.dict(os.environ, env, clear=True):
-            config = CognitoConfig.from_legacy_env()
-
-        assert config.name is None
-        assert config.region == "us-west-2"
-        assert config.user_pool_id == "us-west-2_legacy"
-        assert config.app_client_id == "client_legacy"
-        assert config.aws_profile == "legacy-profile"
-
-    def test_from_legacy_env_region_fallback(self) -> None:
-        """Region falls back to AWS_REGION then us-west-2."""
-        # AWS_REGION fallback
-        env = {
-            "AWS_REGION": "ap-southeast-1",
-            "COGNITO_USER_POOL_ID": "pool",
-            "COGNITO_APP_CLIENT_ID": "client",
-        }
-        with mock.patch.dict(os.environ, env, clear=True):
-            config = CognitoConfig.from_legacy_env()
-        assert config.region == "ap-southeast-1"
-
-        # Default fallback
-        env = {
-            "COGNITO_USER_POOL_ID": "pool",
-            "COGNITO_APP_CLIENT_ID": "client",
-        }
-        with mock.patch.dict(os.environ, env, clear=True):
-            config = CognitoConfig.from_legacy_env()
-        assert config.region == "us-west-2"
-
-    def test_from_legacy_env_client_id_fallback(self) -> None:
-        """Client ID falls back to COGNITO_CLIENT_ID."""
-        env = {
-            "COGNITO_USER_POOL_ID": "pool",
-            "COGNITO_CLIENT_ID": "fallback_client",
-        }
-        with mock.patch.dict(os.environ, env, clear=True):
-            config = CognitoConfig.from_legacy_env()
-        assert config.app_client_id == "fallback_client"
-
-    def test_from_legacy_env_missing_vars(self) -> None:
-        """Missing required vars raises ValueError."""
-        env = {"COGNITO_REGION": "us-west-2"}
-        with mock.patch("pathlib.Path.home", return_value=Path("/tmp/nonexistent-daycog-home")):
-            with mock.patch.dict(os.environ, env, clear=True):
-                with pytest.raises(ValueError) as exc_info:
-                    CognitoConfig.from_legacy_env().validate()
-        assert "COGNITO_USER_POOL_ID" in str(exc_info.value)
