@@ -2,7 +2,7 @@
 
 ## Start Here
 
-- [../README.md](../README.md): repo overview, quickstart, config model, and CLI surface
+- [../README.md](../README.md): repo overview, quickstart, current flat-config model, and CLI surface
 
 ## Additional Repo Notes
 
@@ -11,4 +11,12 @@
 
 ## Source Of Truth
 
-Prefer the current code and root README for operational behavior. Older examples are useful only if they still match the current CLI and library APIs.
+Prefer the current code and root README for operational behavior.
+
+Current expected model:
+
+- one effective YAML config file selected by `daycog config path` or root `--config PATH`
+- built-in `daycog config ...` for generic config-file lifecycle
+- `daycog auth-config ...` for Cognito-specific config sync and inspection
+
+Older examples are useful only if they still match the current CLI and library APIs.

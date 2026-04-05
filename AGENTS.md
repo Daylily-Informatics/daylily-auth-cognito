@@ -22,5 +22,6 @@ source ./activate
 
 - Start with `source ./activate`
 - Use `daycog status`
-- Use `daycog config print --json`
+- Use `daycog config path`
+- Use `daycog auth-config print --json`
 - Use `daycog ...` directly for Cognito pool, app, and user lifecycle

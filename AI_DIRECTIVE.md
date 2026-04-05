@@ -1,116 +1,137 @@
 # AI Directive: daylily-cognito
 
 ## Operational Policy
-Use this repository through `daycog` for Cognito operations.
-Do not run direct AWS Cognito CLI/API commands (`aws cognito-idp ...`) when this library is specified as the operational path.
 
-If asked to perform Cognito pool/user/client lifecycle actions, use `daycog` commands.
+Use this repository through `daycog` for normal Cognito operations.
+
+- Do not run direct AWS Cognito CLI/API commands (`aws cognito-idp ...`) when `daycog` is the intended operational path.
+- Do not bypass the CLI with ad hoc boto3 scripts or direct config-file edits unless the user explicitly approves a workaround.
 
 ## Environment Bootstrap
+
 From repo root, always start with:
 
 ```sh
 source ./activate
 ```
 
-This prepares `.venv`, installs this repo editable, installs completion, and loads `~/.config/daycog/default.env` if present.
-It also wraps `daycog setup` so exported values are applied to the current shell.
+This prepares `.venv`, installs the repo editable, exposes `daycog`, and points imports at the sibling `../cli-core-yo` checkout when present.
 
-## AWS Context Rules
-Many commands require AWS profile/region.
+## Config Model
 
-Resolution order for commands that accept flags:
+The current model is one flat YAML config file per environment.
+
+- Canonical path: `daycog config path`
+- Default path: `~/.config/daycog/config.yaml`
+- One-invocation override: root `--config PATH`
+
+Required file keys:
+
+- `COGNITO_REGION`
+- `COGNITO_USER_POOL_ID`
+- `COGNITO_APP_CLIENT_ID`
+
+Optional file keys:
+
+- `COGNITO_CLIENT_NAME`
+- `COGNITO_CALLBACK_URL`
+- `COGNITO_LOGOUT_URL`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `COGNITO_DOMAIN`
+- `AWS_PROFILE`
+- `AWS_REGION`
+
+Unsupported old model:
+
+- no named config namespaces
+- no legacy context selector field
+- no namespaced env override model
+- no removed multi-target auth-config sync command
+- no per-pool/per-app `.env` file workflow
+
+## Resolution Rules
+
+For config-consuming commands:
+
+- non-`AWS_*` values come from the selected config file only
+- AWS profile precedence: `--profile`, then file `AWS_PROFILE`, then env `AWS_PROFILE`
+- AWS region precedence: `--region`, then file `COGNITO_REGION`, then file `AWS_REGION`, then env `AWS_REGION`
+
+For commands that are purely flag/env driven, use:
+
 1. `--profile`, `--region`
 2. `AWS_PROFILE`, `AWS_REGION`
 
-If still missing, the command errors.
+If required AWS context is still missing, the command errors.
 
 ## Required CLI Usage
 
-### Primary operational commands
+### Orientation and config
+
 ```sh
+daycog --help
 daycog status
+daycog config path
+daycog config init
+daycog auth-config print --json
+daycog --config ./override.yaml auth-config print --json
+daycog auth-config create --pool-name <pool-name> --client-name <app-name> --profile <profile> --region <region>
+daycog auth-config update --pool-name <pool-name> --client-name <app-name> --profile <profile> --region <region>
+```
+
+### Pool and app lifecycle
+
+```sh
 daycog list-pools --profile <profile> --region <region>
-daycog setup --name <pool-name> --port <port> --profile <profile> --region <region>
-daycog setup-with-google --name <pool-name> --client-name <app-name> --profile <profile> --region <region>
-daycog config print
-daycog config print --pool-name <pool-name> --region <region>
-daycog config print --pool-id <pool-id> --region <region>
-daycog config create --pool-name <pool-name> --client-name <app-name> --profile <profile> --region <region>
-daycog config update --pool-name <pool-name> --client-name <app-name> --profile <profile> --region <region>
-daycog config create-all --pool-name <pool-name> --default-client <app-name> --profile <profile> --region <region>
+daycog setup --name <pool-name> --profile <profile> --region <region>
 daycog list-apps --pool-name <pool-name> --profile <profile> --region <region>
 daycog add-app --pool-name <pool-name> --app-name <app-name> --callback-url <url> --profile <profile> --region <region>
 daycog edit-app --pool-name <pool-name> --app-name <app-name> --profile <profile> --region <region>
 daycog remove-app --pool-name <pool-name> --app-name <app-name> --profile <profile> --region <region> --force
-daycog add-google-idp --pool-name <pool-name> --app-name <app-name> --profile <profile> --region <region>
-daycog delete-pool --pool-name <pool-name> --profile <profile> --region <region> --force
-daycog delete-pool --pool-name <pool-name> --profile <profile> --region <region> --delete-domain-first --force
+daycog fix-auth-flows
 ```
 
-For setup customization, prefer `daycog setup` flags over direct AWS changes:
-`--client-name`, `--domain-prefix`, `--attach-domain/--no-attach-domain`,
-`--callback-url`/`--callback-path`, `--logout-url`, `--generate-secret`,
-`--oauth-flows`, `--scopes`, `--idp`, password policy flags, `--mfa`, `--tags`, `--autoprovision`.
+### Google federation
 
-### Supported maintenance commands
+```sh
+daycog add-google-idp --pool-name <pool-name> --app-name <app-name> --profile <profile> --region <region>
+daycog setup-with-google --name <pool-name> --client-name <app-name> --profile <profile> --region <region>
+daycog setup-google --client-id <id> --client-secret <secret>
+```
+
+Current Google behavior:
+
+- `setup-with-google` writes Google credentials into the effective config file
+- `setup-google` writes Google credentials into the effective config file and prints the redirect URI to register
+- `add-google-idp` reads Google credentials from flags, JSON, or the effective config file
+
+### User and group operations
+
 ```sh
 daycog list-users
 daycog add-user <email> --password <password>
 daycog set-password --email <email> --password <password>
-daycog delete-user --email <email> --force
-daycog delete-all-users --force
+daycog ensure-group <group-name>
+daycog add-user-to-group --email <email> --group <group-name>
+daycog set-user-attributes --email <email> --attribute Name=Value
 daycog export --output <path>
-daycog fix-auth-flows
-daycog setup-google --client-id <id> --client-secret <secret>
 ```
 
-### Legacy compatibility command
+### Destructive operations
+
 ```sh
+daycog delete-user --email <email> --force
+daycog delete-all-users --force
+daycog delete-pool --pool-name <pool-name> --profile <profile> --region <region> --force
 daycog teardown --force
 ```
 
-Prefer `delete-pool` over `teardown`. `teardown` is kept for older env-driven flows and should not be used when pool name/ID is known explicitly.
-
-## Config Files
-`daycog setup` writes/updates:
-- `~/.config/daycog/<pool-id>.<region>.env`
-- `~/.config/daycog/<pool-id>.<region>.<app-name>.env`
-- `~/.config/daycog/default.env`
-
-These files contain:
-- `AWS_PROFILE`
-- `AWS_REGION`
-- `COGNITO_REGION`
-- `COGNITO_USER_POOL_ID`
-- `COGNITO_APP_CLIENT_ID`
-- `COGNITO_CLIENT_NAME`
-- `COGNITO_CALLBACK_URL`
-- `COGNITO_LOGOUT_URL` (if configured)
-- `COGNITO_DOMAIN` (if Hosted UI domain attached)
-
-## `daycog config` commands
-Use these for file inspection/sync:
-
-`config create/update` query AWS for pool details, keep `default.env` aligned with the selected pool, and write the selected app file when a pool client exists.
-New writes use pool-ID keyed filenames. If legacy `<pool-name>.<region>*` files exist, touched commands migrate them forward and remove the legacy copies.
-For pool-scoped print, region is required because filenames are region-scoped.
-If multiple app clients exist in a pool, `config create/update` require `--client-name` or `--client-id`; otherwise they fail and recommend `config create-all`.
-
-Multi-app guidance:
-- Keep one app file per app client (`<pool-id>.<region>.<app>.env`).
-- Pool file (`<pool-id>.<region>.env`) stores the selected app context for that pool/region.
-- `default.env` stores active global context.
-- Use `--set-default` on `add-app`/`edit-app` when the new app should become active in pool/default env files.
-- Use `config create-all --default-client <app-name>` when a multi-service host needs all app files plus a selected pool/default context.
-- `delete-pool` removes pool/app config files for that pool+region and removes `default.env` if it references that pool ID.
-- `setup` should warn (not fail) when target config files already exist, then update them.
-- `setup-google` only prints environment variables and redirect URI guidance; it does not mutate Cognito.
-- For Google federation, use `add-google-idp` with `--google-client-json` or credential flags/env vars.
-- Prefer `setup-with-google` for first-time pool/app provisioning plus Google IdP in one operation.
-- Do not assume Google client secret can be fetched from Google automatically; use provided JSON or env credentials.
+Prefer `delete-pool` over `teardown` when the pool is explicitly known.
 
 ## Guardrails for Agents
-- Prefer `daycog` over ad-hoc boto3 scripts for operational actions.
+
+- Prefer `daycog` over ad hoc boto3 scripts for operational actions.
 - Do not use `aws cognito-idp` directly when this repo is designated for operations.
-- Use `--force` only for destructive commands when explicitly intended.
+- Treat destructive commands as high-risk and use `--force` only when the user explicitly intends the deletion.
+- Keep docs, tests, and examples aligned with the current flat-file config model and current command names.
