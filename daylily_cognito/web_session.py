@@ -334,7 +334,7 @@ def load_session_principal(request: Request) -> SessionPrincipal | None:
 
 
 def clear_session_principal(request: Request) -> None:
-    """Remove the persisted browser principal and any legacy token fields."""
+    """Remove the persisted browser principal and all token fields."""
     session = getattr(request, "session", None)
     if session is None:
         return
