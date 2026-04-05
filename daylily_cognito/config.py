@@ -134,22 +134,24 @@ class CognitoConfig:
 
     @classmethod
     def from_env(cls, name: str, *, prefix: str = "DAYCOG") -> "CognitoConfig":
-        """Load configuration from the canonical config store or env vars.
+        """Load configuration from the canonical config store.
 
-        The YAML store is authoritative; DAYCOG_<NAME>_* variables still override
-        it when they are present in the process environment.
+        All values come from ~/.config/daycog/config.yaml contexts.
+        AWS_PROFILE is the only value also read from os.environ because
+        boto3 requires it in the process environment for credential selection.
         """
         name_upper = name.upper()
         env_prefix = f"{prefix}_{name_upper}_"
         stored = get_context_values(name)
 
-        region = os.environ.get(f"{env_prefix}REGION", stored.get("COGNITO_REGION", ""))
-        user_pool_id = os.environ.get(f"{env_prefix}USER_POOL_ID", stored.get("COGNITO_USER_POOL_ID", ""))
-        app_client_id = os.environ.get(f"{env_prefix}APP_CLIENT_ID", stored.get("COGNITO_APP_CLIENT_ID", ""))
-        aws_profile = os.environ.get(f"{env_prefix}AWS_PROFILE") or stored.get("AWS_PROFILE")
-        google_client_id = os.environ.get(f"{env_prefix}GOOGLE_CLIENT_ID") or stored.get("GOOGLE_CLIENT_ID")
-        google_client_secret = os.environ.get(f"{env_prefix}GOOGLE_CLIENT_SECRET") or stored.get("GOOGLE_CLIENT_SECRET")
-        cognito_domain = os.environ.get(f"{env_prefix}COGNITO_DOMAIN") or stored.get("COGNITO_DOMAIN")
+        region = stored.get("COGNITO_REGION", "")
+        user_pool_id = stored.get("COGNITO_USER_POOL_ID", "")
+        app_client_id = stored.get("COGNITO_APP_CLIENT_ID", "")
+        # AWS_PROFILE: boto3 reads this from os.environ for credential selection
+        aws_profile = os.environ.get("AWS_PROFILE") or stored.get("AWS_PROFILE")
+        google_client_id = stored.get("GOOGLE_CLIENT_ID")
+        google_client_secret = stored.get("GOOGLE_CLIENT_SECRET")
+        cognito_domain = stored.get("COGNITO_DOMAIN")
 
         config = cls(
             name=name,
