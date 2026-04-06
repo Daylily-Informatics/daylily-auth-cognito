@@ -369,3 +369,4 @@ Key rules:
 - do not bypass `daycog` with direct `aws cognito-idp ...`, ad hoc boto3 scripts, or manual config-file edits for normal operational work
 - prefer `daycog config path`, `daycog config init`, and `daycog auth-config print --json` for orientation
 - keep Hosted UI behavior aligned with the current contract: exchange tokens during callback, persist normalized principal/session state, and avoid storing raw OAuth tokens in the session
+ 
