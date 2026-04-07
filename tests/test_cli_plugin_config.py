@@ -250,6 +250,8 @@ def test_runtime_and_admin_helpers_cover_error_and_success_paths(
     resolved_admin, resolved_runtime = plugin._get_admin_client()
     assert resolved_admin is admin
     assert resolved_runtime is runtime
+    assert admin.user_pool_id == "pool-123"
+    assert admin.app_client_id == "client-123"
 
     bad_runtime = _runtime(path=path, values={})
     monkeypatch.setattr(plugin, "_get_runtime_config", lambda **kwargs: bad_runtime)
