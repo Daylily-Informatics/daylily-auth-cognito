@@ -46,13 +46,28 @@ def test_build_authorization_url_includes_expected_query_fields() -> None:
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
 
+    assert parsed.scheme == "https"
     assert parsed.netloc == "auth.example.test"
+    assert parsed.path == "/oauth2/authorize"
     assert params["client_id"] == ["client-123"]
+    assert params["redirect_uri"] == ["https://app.example.test/auth/callback"]
     assert params["response_type"] == ["code"]
     assert params["scope"] == ["openid email profile"]
     assert params["state"] == ["state-123"]
     assert params["code_challenge"] == ["challenge-123"]
     assert params["code_challenge_method"] == ["S256"]
+
+
+def test_build_authorization_url_supports_custom_scope() -> None:
+    url = build_authorization_url(
+        domain="auth.example.test",
+        client_id="client-123",
+        redirect_uri="https://app.example.test/auth/callback",
+        scope="openid",
+    )
+
+    params = parse_qs(urlparse(url).query)
+    assert params["scope"] == ["openid"]
 
 
 def test_build_logout_url_uses_normalized_domain() -> None:
@@ -65,9 +80,26 @@ def test_build_logout_url_uses_normalized_domain() -> None:
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
 
+    assert parsed.scheme == "https"
     assert parsed.netloc == "auth.example.test"
+    assert parsed.path == "/logout"
     assert params["client_id"] == ["client-123"]
     assert params["logout_uri"] == ["https://app.example.test/logout"]
+
+
+def test_build_logout_url_is_stable_across_calls() -> None:
+    url1 = build_logout_url(
+        domain="auth.example.test",
+        client_id="client-123",
+        logout_uri="https://app.example.test/logout",
+    )
+    url2 = build_logout_url(
+        domain="auth.example.test",
+        client_id="client-123",
+        logout_uri="https://app.example.test/logout",
+    )
+
+    assert url1 == url2
 
 
 def test_exchange_authorization_code_posts_form_and_returns_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -86,6 +118,8 @@ def test_exchange_authorization_code_posts_form_and_returns_tokens(monkeypatch: 
     assert tokens["access_token"] == "access-123"
     request = fake_urlopen.call_args.args[0]
     body = request.data.decode("utf-8")
+    assert request.method == "POST"
+    assert request.full_url == "https://auth.example.test/oauth2/token"
     assert "grant_type=authorization_code" in body
     assert "client_id=client-123" in body
     assert "client_secret=secret-123" in body
