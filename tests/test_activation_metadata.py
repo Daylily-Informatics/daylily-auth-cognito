@@ -1,23 +1,36 @@
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 
-def test_activate_uses_metadata_only_editable_detection() -> None:
-    activate_script = (Path(__file__).resolve().parents[1] / "activate").read_text(encoding="utf-8")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
-    assert "daylily-cognito" in activate_script
+
+def test_activate_uses_new_distribution_name_and_dev_extra_only() -> None:
+    activate_script = (REPO_ROOT / "activate").read_text(encoding="utf-8")
+
+    assert "daylily-auth-cognito" in activate_script
     assert "Editable project location" in activate_script
-    assert "daylily-cognito is not installed editable from" in activate_script
-    assert "_daycog_module_is_from_repo" not in activate_script
-    assert 'python -m pip install --no-build-isolation -e "${_DAYCOG_ACTIVATE_DIR}[dev,auth]"' in activate_script
+    assert "daylily-auth-cognito is not installed editable from" in activate_script
+    assert 'python -m pip install --no-build-isolation -e "${_DAYCOG_ACTIVATE_DIR}[dev]"' in activate_script
+    assert "[dev,auth]" not in activate_script
+    assert "daylily" + "-cognito" not in activate_script
+
+
+def test_pyproject_uses_new_distribution_name_and_base_jose_dependency() -> None:
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert pyproject["project"]["name"] == "daylily-auth-cognito"
+    assert "python-jose[cryptography]>=3.3.0" in pyproject["project"]["dependencies"]
+    assert "auth" not in pyproject["project"].get("optional-dependencies", {})
+    assert pyproject["project"]["scripts"]["daycog"] == "daylily_auth_cognito.cli.main:main"
 
 
 def test_activate_reads_cli_core_requirement_from_pyproject() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    activate_script = (repo_root / "activate").read_text(encoding="utf-8")
-    pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    activate_script = (REPO_ROOT / "activate").read_text(encoding="utf-8")
+    pyproject_text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     match = re.search(r'^\s*"(?P<dependency>cli-core-yo[^"]+)",\s*$', pyproject_text, re.MULTILINE)
 
     assert match is not None
