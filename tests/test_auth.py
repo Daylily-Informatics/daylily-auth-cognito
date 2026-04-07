@@ -16,7 +16,6 @@ from daylily_auth_cognito.admin.client import CognitoAdminClient
 from daylily_auth_cognito.policy.email_domains import DomainValidator
 
 
-
 def _admin(client: mock.Mock | None = None, **overrides) -> CognitoAdminClient:
     defaults = {
         "region": "us-west-2",

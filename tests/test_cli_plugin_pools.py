@@ -74,7 +74,9 @@ def test_setup_creates_pool_domain_client_and_writes_config(monkeypatch: pytest.
         },
     )
     monkeypatch.setattr(pools_plugin, "ensure_user_pool_domain", lambda current_admin, **kwargs: "auth.example.test")
-    monkeypatch.setattr(pools_plugin, "find_app_client", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("missing")))
+    monkeypatch.setattr(
+        pools_plugin, "find_app_client", lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("missing"))
+    )
     create_calls: dict[str, object] = {}
 
     def fake_create_app_client(current_admin, **kwargs):
@@ -154,7 +156,11 @@ def test_setup_reuses_existing_pool_and_app_client(monkeypatch: pytest.MonkeyPat
             "pool_info": {"Name": "ursa-users", "Domain": "existing-domain"},
         },
     )
-    monkeypatch.setattr(pools_plugin, "ensure_user_pool_domain", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected domain create")))
+    monkeypatch.setattr(
+        pools_plugin,
+        "ensure_user_pool_domain",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected domain create")),
+    )
     monkeypatch.setattr(
         pools_plugin,
         "find_app_client",
@@ -197,7 +203,9 @@ def test_setup_reuses_existing_pool_and_app_client(monkeypatch: pytest.MonkeyPat
     assert admin.app_client_id == "client-999"
     assert create_app_client_mock.call_count == 0
     assert "User pool 'ursa-users' already exists" in messages
-    assert "Pool already has domain 'existing-domain' (requested 'requested-domain'). Keeping existing domain." in messages
+    assert (
+        "Pool already has domain 'existing-domain' (requested 'requested-domain'). Keeping existing domain." in messages
+    )
     assert "Reusing app client 'web-client': client-999" in messages
     assert "COGNITO_DOMAIN=existing-domain.auth.us-west-2.amazoncognito.com" in messages
 

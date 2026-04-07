@@ -40,7 +40,7 @@ def test_build_jwks_url() -> None:
 def test_fetch_jwks_returns_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "daylily_auth_cognito.runtime.jwks.urllib.request.urlopen",
-        lambda request, timeout=10: _Response({"keys": [{"kid": "kid-1"}]})
+        lambda request, timeout=10: _Response({"keys": [{"kid": "kid-1"}]}),
     )
 
     payload = fetch_jwks("us-west-2", "pool-123")

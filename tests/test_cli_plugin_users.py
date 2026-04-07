@@ -45,9 +45,25 @@ def test_set_password_and_group_commands_delegate(monkeypatch: pytest.MonkeyPatc
     set_password_calls: list[tuple[str, str, bool]] = []
     ensure_group_calls: list[tuple[str, str]] = []
     add_to_group_calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(users_plugin, "set_user_password", lambda current_admin, **kwargs: set_password_calls.append((kwargs["email"], kwargs["password"], kwargs["permanent"])))
-    monkeypatch.setattr(users_plugin, "ensure_group", lambda current_admin, **kwargs: ensure_group_calls.append((kwargs["group_name"], kwargs["description"])) or True)
-    monkeypatch.setattr(users_plugin, "add_user_to_group", lambda current_admin, **kwargs: add_to_group_calls.append((kwargs["email"], kwargs["group_name"])))
+    monkeypatch.setattr(
+        users_plugin,
+        "set_user_password",
+        lambda current_admin, **kwargs: set_password_calls.append(
+            (kwargs["email"], kwargs["password"], kwargs["permanent"])
+        ),
+    )
+    monkeypatch.setattr(
+        users_plugin,
+        "ensure_group",
+        lambda current_admin, **kwargs: (
+            ensure_group_calls.append((kwargs["group_name"], kwargs["description"])) or True
+        ),
+    )
+    monkeypatch.setattr(
+        users_plugin,
+        "add_user_to_group",
+        lambda current_admin, **kwargs: add_to_group_calls.append((kwargs["email"], kwargs["group_name"])),
+    )
 
     result = runner.invoke(app, ["set-password", "--email", "user@example.test", "--password", "Secret123"])
 
@@ -69,7 +85,9 @@ def test_set_user_attributes_validation_and_update(monkeypatch: pytest.MonkeyPat
     _patch_admin(monkeypatch, admin, runtime)
     messages = _capture_messages(monkeypatch)
     attribute_calls: list[dict[str, object]] = []
-    monkeypatch.setattr(users_plugin, "set_user_attributes", lambda current_admin, **kwargs: attribute_calls.append(kwargs))
+    monkeypatch.setattr(
+        users_plugin, "set_user_attributes", lambda current_admin, **kwargs: attribute_calls.append(kwargs)
+    )
 
     with pytest.raises(typer.Exit) as exc_info:
         users_plugin.set_user_attributes_cmd(email="user@example.test", attribute=[])
@@ -99,7 +117,9 @@ def test_add_user_covers_temp_permanent_and_no_verify_branches(monkeypatch: pyte
     password_calls: list[dict[str, object]] = []
     monkeypatch.setattr(users_plugin, "generate_temporary_password", lambda: "TEMP-123456")
     monkeypatch.setattr(users_plugin, "create_user", lambda current_admin, **kwargs: create_calls.append(kwargs))
-    monkeypatch.setattr(users_plugin, "set_user_password", lambda current_admin, **kwargs: password_calls.append(kwargs))
+    monkeypatch.setattr(
+        users_plugin, "set_user_password", lambda current_admin, **kwargs: password_calls.append(kwargs)
+    )
 
     users_plugin.add_user(email="user@example.test", password=None, no_verify=False)
     users_plugin.add_user(email="user@example.test", password="Manual123", no_verify=False)
@@ -109,9 +129,7 @@ def test_add_user_covers_temp_permanent_and_no_verify_branches(monkeypatch: pyte
     assert create_calls[0]["suppress_message"] is True
     assert create_calls[1]["temporary_password"] == "Manual123"
     assert create_calls[2]["email_verified"] is True
-    assert password_calls == [
-        {"email": "user@example.test", "password": "Permanent123", "permanent": True}
-    ]
+    assert password_calls == [{"email": "user@example.test", "password": "Permanent123", "permanent": True}]
     assert "Temporary password: TEMP-123456" in messages
     assert "Password set (temporary - must change on first login)" in messages
     assert "Password set (permanent)" in messages
@@ -158,9 +176,13 @@ def test_list_export_delete_and_delete_all_users(monkeypatch: pytest.MonkeyPatch
         },
     )
     delete_user_calls: list[str] = []
-    monkeypatch.setattr(users_plugin, "delete_user", lambda current_admin, **kwargs: delete_user_calls.append(kwargs["email"]) or False)
+    monkeypatch.setattr(
+        users_plugin, "delete_user", lambda current_admin, **kwargs: delete_user_calls.append(kwargs["email"]) or False
+    )
     delete_all_calls: list[object] = []
-    monkeypatch.setattr(users_plugin, "delete_all_users", lambda current_admin: delete_all_calls.append(current_admin) or 2)
+    monkeypatch.setattr(
+        users_plugin, "delete_all_users", lambda current_admin: delete_all_calls.append(current_admin) or 2
+    )
 
     users_plugin.list_users_cmd(limit=1)
     output_file = tmp_path / "users.json"

@@ -57,7 +57,10 @@ def test_parse_helpers_and_validation_branches(monkeypatch: pytest.MonkeyPatch) 
         {"Name": "custom:role", "Value": "scientist"},
     ]
     assert plugin._resolve_callback_url(None, 8080, "auth/callback") == "http://localhost:8080/auth/callback"
-    assert plugin._resolve_callback_url("https://example.test/callback", 8080, "/ignored") == "https://example.test/callback"
+    assert (
+        plugin._resolve_callback_url("https://example.test/callback", 8080, "/ignored")
+        == "https://example.test/callback"
+    )
     assert plugin._resolve_mfa_configuration("off") == "OFF"
     assert plugin._resolve_mfa_configuration("required") == "ON"
 
@@ -73,7 +76,9 @@ def test_parse_helpers_and_validation_branches(monkeypatch: pytest.MonkeyPatch) 
         plugin._resolve_mfa_configuration("unsupported")
 
 
-def test_google_client_resolution_uses_json_then_config_and_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_google_client_resolution_uses_json_then_config_and_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     client_json = _write_json(
         tmp_path / "client.json",
         {
@@ -104,7 +109,9 @@ def test_google_client_resolution_uses_json_then_config_and_errors(monkeypatch: 
         google_client_json=None,
     ) == ("gid-config", "gsecret-config")
 
-    monkeypatch.setattr(plugin, "load_config_file", lambda *args, **kwargs: (_ for _ in ()).throw(plugin.ConfigError("missing")))
+    monkeypatch.setattr(
+        plugin, "load_config_file", lambda *args, **kwargs: (_ for _ in ()).throw(plugin.ConfigError("missing"))
+    )
     with pytest.raises(click.exceptions.Exit):
         plugin._resolve_google_client_details(
             google_client_id=None,
@@ -123,9 +130,18 @@ def test_google_client_resolution_uses_json_then_config_and_errors(monkeypatch: 
 
 
 def test_domain_and_config_builders_normalize_expected_values() -> None:
-    assert plugin._resolve_cognito_domain({"Domain": "auth-prefix"}, "us-west-2") == "auth-prefix.auth.us-west-2.amazoncognito.com"
-    assert plugin._resolve_cognito_domain({"CustomDomain": "https://auth.example.test"}, "us-west-2") == "https://auth.example.test"
-    assert plugin._resolve_cognito_domain({"CustomDomain": {"DomainName": "auth.example.test"}}, "us-west-2") == "auth.example.test"
+    assert (
+        plugin._resolve_cognito_domain({"Domain": "auth-prefix"}, "us-west-2")
+        == "auth-prefix.auth.us-west-2.amazoncognito.com"
+    )
+    assert (
+        plugin._resolve_cognito_domain({"CustomDomain": "https://auth.example.test"}, "us-west-2")
+        == "https://auth.example.test"
+    )
+    assert (
+        plugin._resolve_cognito_domain({"CustomDomain": {"DomainName": "auth.example.test"}}, "us-west-2")
+        == "auth.example.test"
+    )
     assert plugin._resolve_cognito_domain({}, "us-west-2") == ""
 
     pool = {
@@ -215,7 +231,9 @@ def test_print_config_supports_json_and_human_modes(monkeypatch: pytest.MonkeyPa
     assert emitted[-1]["values"]["COGNITO_REGION"] == "us-west-2"
 
 
-def test_runtime_and_admin_helpers_cover_error_and_success_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_runtime_and_admin_helpers_cover_error_and_success_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     path = tmp_path / "config.yaml"
     _patch_active_config(monkeypatch, path)
 
@@ -244,7 +262,11 @@ def test_runtime_and_admin_helpers_cover_error_and_success_paths(monkeypatch: py
 def test_select_config_client_and_resolve_values_from_aws(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     admin = mock.Mock()
     pool_id = "pool-123"
-    monkeypatch.setattr(plugin.app_client_admin, "list_app_clients", lambda admin, user_pool_id=None: [{"ClientId": "client-123", "ClientName": "web-client"}])
+    monkeypatch.setattr(
+        plugin.app_client_admin,
+        "list_app_clients",
+        lambda admin, user_pool_id=None: [{"ClientId": "client-123", "ClientName": "web-client"}],
+    )
     monkeypatch.setattr(
         plugin.app_client_admin,
         "describe_app_client",
@@ -266,13 +288,24 @@ def test_select_config_client_and_resolve_values_from_aws(monkeypatch: pytest.Mo
     monkeypatch.setattr(plugin.app_client_admin, "list_app_clients", lambda admin, user_pool_id=None: [])
     assert plugin._select_config_client(admin, pool_id) is None
 
-    monkeypatch.setattr(plugin.app_client_admin, "list_app_clients", lambda admin, user_pool_id=None: [{"ClientId": "client-123", "ClientName": "web-client"}, {"ClientId": "client-456", "ClientName": "api-client"}])
+    monkeypatch.setattr(
+        plugin.app_client_admin,
+        "list_app_clients",
+        lambda admin, user_pool_id=None: [
+            {"ClientId": "client-123", "ClientName": "web-client"},
+            {"ClientId": "client-456", "ClientName": "api-client"},
+        ],
+    )
     with pytest.raises(click.exceptions.Exit):
         plugin._select_config_client(admin, pool_id)
     with pytest.raises(click.exceptions.Exit):
         plugin._select_config_client(admin, pool_id, client_name="web-client", client_id="client-123")
 
-    monkeypatch.setattr(plugin.app_client_admin, "list_app_clients", lambda admin, user_pool_id=None: [{"ClientId": "client-123", "ClientName": "web-client"}])
+    monkeypatch.setattr(
+        plugin.app_client_admin,
+        "list_app_clients",
+        lambda admin, user_pool_id=None: [{"ClientId": "client-123", "ClientName": "web-client"}],
+    )
     monkeypatch.setattr(
         plugin.pool_admin,
         "resolve_pool",
@@ -282,7 +315,11 @@ def test_select_config_client_and_resolve_values_from_aws(monkeypatch: pytest.Mo
             "pool_info": {"Domain": "auth-prefix"},
         },
     )
-    monkeypatch.setattr(plugin, "_get_admin_client", lambda **kwargs: (admin, _runtime(path=tmp_path / "config.yaml", values={"AWS_PROFILE": "dev-profile"})))
+    monkeypatch.setattr(
+        plugin,
+        "_get_admin_client",
+        lambda **kwargs: (admin, _runtime(path=tmp_path / "config.yaml", values={"AWS_PROFILE": "dev-profile"})),
+    )
     monkeypatch.setattr(plugin, "active_config_path", lambda: tmp_path / "config.yaml")
 
     path, values = plugin._resolve_config_values_from_aws(

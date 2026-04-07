@@ -28,14 +28,15 @@ def list_apps(
     profile: str | None = typer.Option(None, "--profile", help="AWS profile to use"),
     region: str | None = typer.Option(None, "--region", help="AWS region to use"),
 ) -> None:
-    admin, runtime = _get_admin_client(profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True)
+    admin, runtime = _get_admin_client(
+        profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True
+    )
     pool_id = find_user_pool_id_by_name(admin, pool_name)
     clients = list_app_clients(admin, user_pool_id=pool_id)
     ccyo_out.info(f"Cognito App Clients ({pool_name} / {runtime.aws_region})")
     for client in clients:
         ccyo_out.info(f"- {client.get('ClientName', '')} ({client.get('ClientId', '')})")
     ccyo_out.info(f"Total: {len(clients)} app clients")
-
 
 
 def add_app(
@@ -49,9 +50,13 @@ def add_app(
     oauth_flows: str = typer.Option("code", "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: str = typer.Option("openid,email,profile", "--scopes", help="Comma-separated OAuth scopes"),
     idps: str = typer.Option("COGNITO", "--idp", help="Comma-separated identity providers"),
-    set_default: bool = typer.Option(False, "--set-default", help="Print a reminder to refresh the auth config file to this app"),
+    set_default: bool = typer.Option(
+        False, "--set-default", help="Print a reminder to refresh the auth config file to this app"
+    ),
 ) -> None:
-    admin, _runtime = _get_admin_client(profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True)
+    admin, _runtime = _get_admin_client(
+        profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True
+    )
     pool_id = find_user_pool_id_by_name(admin, pool_name)
     try:
         client = create_app_client(
@@ -74,7 +79,6 @@ def add_app(
         ccyo_out.info("Run daycog auth-config update if you want the config file to point at this app.")
 
 
-
 def add_m2m_app(
     pool_name: str = typer.Option(..., "--pool-name", help="Cognito pool name"),
     app_name: str = typer.Option(..., "--app-name", help="External app client name"),
@@ -83,7 +87,9 @@ def add_m2m_app(
     scopes: str = typer.Option(..., "--scopes", help="Comma-separated OAuth scopes for client_credentials"),
     emit_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    admin, _runtime = _get_admin_client(profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True)
+    admin, _runtime = _get_admin_client(
+        profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True
+    )
     resolved_scopes = _parse_csv(scopes)
     if not resolved_scopes:
         ccyo_out.info("[red]x[/red] Provide at least one scope with --scopes")
@@ -105,7 +111,6 @@ def add_m2m_app(
     ccyo_out.info(f"Client secret: {payload['client_secret']}")
 
 
-
 def edit_app(
     pool_name: str = typer.Option(..., "--pool-name", help="Cognito pool name"),
     app_name: str | None = typer.Option(None, "--app-name", help="Existing app client name"),
@@ -118,12 +123,16 @@ def edit_app(
     oauth_flows: str | None = typer.Option(None, "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: str | None = typer.Option(None, "--scopes", help="Comma-separated OAuth scopes"),
     idps: str | None = typer.Option(None, "--idp", help="Comma-separated identity providers"),
-    set_default: bool = typer.Option(False, "--set-default", help="Print a reminder to refresh the auth config file to this app"),
+    set_default: bool = typer.Option(
+        False, "--set-default", help="Print a reminder to refresh the auth config file to this app"
+    ),
 ) -> None:
     if not app_name and not client_id:
         ccyo_out.info("[red]x[/red] Provide one of: --app-name or --client-id")
         raise typer.Exit(1)
-    admin, _runtime = _get_admin_client(profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True)
+    admin, _runtime = _get_admin_client(
+        profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True
+    )
     pool_id = find_user_pool_id_by_name(admin, pool_name)
     try:
         found = find_app_client(admin, user_pool_id=pool_id, client_name=app_name, client_id=client_id)
@@ -147,7 +156,6 @@ def edit_app(
         ccyo_out.info("Run daycog auth-config update if you want the config file to point at this app.")
 
 
-
 def remove_app(
     pool_name: str = typer.Option(..., "--pool-name", help="Cognito pool name"),
     app_name: str | None = typer.Option(None, "--app-name", help="App client name"),
@@ -161,7 +169,9 @@ def remove_app(
     if not app_name and not client_id:
         ccyo_out.info("[red]x[/red] Provide one of: --app-name or --client-id")
         raise typer.Exit(1)
-    admin, _runtime = _get_admin_client(profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True)
+    admin, _runtime = _get_admin_client(
+        profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True
+    )
     pool_id = find_user_pool_id_by_name(admin, pool_name)
     try:
         found = find_app_client(admin, user_pool_id=pool_id, client_name=app_name, client_id=client_id)
@@ -175,11 +185,18 @@ def remove_app(
     ccyo_out.info(f"Deleted app client: {found['client_name']} ({found['client_id']})")
 
 
-
 def register(registry: CommandRegistry, spec: CliSpec | None = None) -> None:
     del spec
     registry.add_command(None, "list-apps", list_apps, help_text="List app clients for a pool.", policy=READ_POLICY)
-    registry.add_command(None, "add-app", add_app, help_text="Add a new app client to an existing pool.", policy=MUTATE_POLICY)
-    registry.add_command(None, "add-m2m-app", add_m2m_app, help_text="Create a client_credentials app client.", policy=READ_JSON_POLICY)
-    registry.add_command(None, "edit-app", edit_app, help_text="Edit an existing app client in a pool.", policy=MUTATE_POLICY)
-    registry.add_command(None, "remove-app", remove_app, help_text="Remove an app client from a pool.", policy=MUTATE_POLICY)
+    registry.add_command(
+        None, "add-app", add_app, help_text="Add a new app client to an existing pool.", policy=MUTATE_POLICY
+    )
+    registry.add_command(
+        None, "add-m2m-app", add_m2m_app, help_text="Create a client_credentials app client.", policy=READ_JSON_POLICY
+    )
+    registry.add_command(
+        None, "edit-app", edit_app, help_text="Edit an existing app client in a pool.", policy=MUTATE_POLICY
+    )
+    registry.add_command(
+        None, "remove-app", remove_app, help_text="Remove an app client from a pool.", policy=MUTATE_POLICY
+    )

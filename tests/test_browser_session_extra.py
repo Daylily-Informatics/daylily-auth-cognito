@@ -84,7 +84,12 @@ def test_error_and_config_aliases_cover_public_surface() -> None:
 
 
 def test_config_aliases_cover_http_public_base_with_override() -> None:
-    config = _config(public_base_url=None, allow_insecure_http=True, redirect_uri="http://app.example.test/auth/callback", logout_uri="http://app.example.test/logout")
+    config = _config(
+        public_base_url=None,
+        allow_insecure_http=True,
+        redirect_uri="http://app.example.test/auth/callback",
+        logout_uri="http://app.example.test/logout",
+    )
 
     assert config.effective_public_base_url == "http://app.example.test"
     assert config.https_only is False
@@ -295,9 +300,18 @@ def test_clear_session_principal_handles_missing_session() -> None:
         ({"session_max_age": 0}, "session_max_age must be positive"),
         ({"server_instance_id": ""}, "server_instance_id is required"),
         ({"domain": "", "server_instance_id": "server-123"}, "domain is required"),
-        ({"redirect_uri": "http://evil.example.test/callback", "server_instance_id": "server-123"}, "redirect_uri must share scheme and host"),
-        ({"logout_uri": "http://evil.example.test/logout", "server_instance_id": "server-123"}, "logout_uri must share scheme and host"),
-        ({"public_base_url": "http://app.example.test", "server_instance_id": "server-123"}, "HTTP public_base_url requires allow_insecure_http=True"),
+        (
+            {"redirect_uri": "http://evil.example.test/callback", "server_instance_id": "server-123"},
+            "redirect_uri must share scheme and host",
+        ),
+        (
+            {"logout_uri": "http://evil.example.test/logout", "server_instance_id": "server-123"},
+            "logout_uri must share scheme and host",
+        ),
+        (
+            {"public_base_url": "http://app.example.test", "server_instance_id": "server-123"},
+            "HTTP public_base_url requires allow_insecure_http=True",
+        ),
     ],
 )
 def test_validate_web_auth_contract_rejects_invalid_cases(config_kwargs: dict[str, Any], match: str) -> None:
@@ -308,7 +322,12 @@ def test_validate_web_auth_contract_rejects_invalid_cases(config_kwargs: dict[st
 
 
 def test_private_helpers_cover_normalization_and_error_branches() -> None:
-    config = _config(public_base_url=None, allow_insecure_http=True, redirect_uri="http://app.example.test/auth/callback", logout_uri="http://app.example.test/logout")
+    config = _config(
+        public_base_url=None,
+        allow_insecure_http=True,
+        redirect_uri="http://app.example.test/auth/callback",
+        logout_uri="http://app.example.test/logout",
+    )
 
     assert web_session._sanitize_next_path(None) == "/"
     assert web_session._sanitize_next_path("/auth/login") == "/"

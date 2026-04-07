@@ -34,7 +34,6 @@ def set_password(
     ccyo_out.info(f"Password set for: {email}")
 
 
-
 def ensure_group_cmd(
     group_name: str = typer.Argument(..., help="Group name"),
     description: str = typer.Option("", "--description", help="Optional group description"),
@@ -42,7 +41,6 @@ def ensure_group_cmd(
     admin, _runtime = _get_admin_client(require_profile=True)
     created = ensure_group(admin, group_name=group_name, description=description)
     ccyo_out.info(("Created" if created else "Group already exists") + f": {group_name}")
-
 
 
 def add_user_to_group_cmd(
@@ -54,10 +52,11 @@ def add_user_to_group_cmd(
     ccyo_out.info(f"Added {email} to group: {group_name}")
 
 
-
 def set_user_attributes_cmd(
     email: str = typer.Option(..., "--email", help="User email address"),
-    attribute: list[str] = typer.Option([], "--attribute", "-a", help="Attribute assignment in Name=Value form. Repeat for multiple attributes."),
+    attribute: list[str] = typer.Option(
+        [], "--attribute", "-a", help="Attribute assignment in Name=Value form. Repeat for multiple attributes."
+    ),
 ) -> None:
     attributes = _parse_attributes(attribute)
     if not attributes:
@@ -66,7 +65,6 @@ def set_user_attributes_cmd(
     admin, _runtime = _get_admin_client(require_profile=True)
     set_user_attributes(admin, email=email, attributes=attributes)
     ccyo_out.info(f"Updated attributes for: {email}")
-
 
 
 def add_user(
@@ -97,7 +95,6 @@ def add_user(
         ccyo_out.info("Password set (temporary - must change on first login)")
 
 
-
 def list_users_cmd(
     limit: int = typer.Option(50, "--limit", "-l", help="Max users to list"),
 ) -> None:
@@ -111,7 +108,6 @@ def list_users_cmd(
     ccyo_out.info(f"Total: {len(users)} users")
 
 
-
 def export_users_cmd(
     output: str = typer.Option("cognito_users.log", "--output", "-o", help="Output file path"),
 ) -> None:
@@ -120,7 +116,6 @@ def export_users_cmd(
     with open(output, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, default=str)
     ccyo_out.info(f"Exported {payload['user_count']} users to: {output}")
-
 
 
 def delete_user_cmd(
@@ -138,7 +133,6 @@ def delete_user_cmd(
     raise typer.Exit(1)
 
 
-
 def delete_all_users_cmd(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
@@ -150,15 +144,42 @@ def delete_all_users_cmd(
     ccyo_out.info(f"Deleted {deleted} users")
 
 
-
 def register(registry: CommandRegistry, spec: CliSpec | None = None) -> None:
     del spec
-    registry.add_command(None, "set-password", set_password, help_text="Set password for a Cognito user.", policy=MUTATE_POLICY)
-    registry.add_command(None, "ensure-group", ensure_group_cmd, help_text="Ensure a Cognito group exists.", policy=MUTATE_POLICY)
-    registry.add_command(None, "add-user-to-group", add_user_to_group_cmd, help_text="Add a user to a Cognito group.", policy=MUTATE_POLICY)
-    registry.add_command(None, "set-user-attributes", set_user_attributes_cmd, help_text="Update Cognito user attributes.", policy=MUTATE_POLICY)
-    registry.add_command(None, "add-user", add_user, help_text="Add a new user to the Cognito pool.", policy=MUTATE_POLICY)
+    registry.add_command(
+        None, "set-password", set_password, help_text="Set password for a Cognito user.", policy=MUTATE_POLICY
+    )
+    registry.add_command(
+        None, "ensure-group", ensure_group_cmd, help_text="Ensure a Cognito group exists.", policy=MUTATE_POLICY
+    )
+    registry.add_command(
+        None,
+        "add-user-to-group",
+        add_user_to_group_cmd,
+        help_text="Add a user to a Cognito group.",
+        policy=MUTATE_POLICY,
+    )
+    registry.add_command(
+        None,
+        "set-user-attributes",
+        set_user_attributes_cmd,
+        help_text="Update Cognito user attributes.",
+        policy=MUTATE_POLICY,
+    )
+    registry.add_command(
+        None, "add-user", add_user, help_text="Add a new user to the Cognito pool.", policy=MUTATE_POLICY
+    )
     registry.add_command(None, "list-users", list_users_cmd, help_text="List all Cognito users.", policy=READ_POLICY)
-    registry.add_command(None, "export", export_users_cmd, help_text="Export all Cognito users to a log file.", policy=READ_POLICY)
-    registry.add_command(None, "delete-user", delete_user_cmd, help_text="Delete a single Cognito user.", policy=MUTATE_POLICY)
-    registry.add_command(None, "delete-all-users", delete_all_users_cmd, help_text="Delete all Cognito users from the configured pool.", policy=MUTATE_POLICY)
+    registry.add_command(
+        None, "export", export_users_cmd, help_text="Export all Cognito users to a log file.", policy=READ_POLICY
+    )
+    registry.add_command(
+        None, "delete-user", delete_user_cmd, help_text="Delete a single Cognito user.", policy=MUTATE_POLICY
+    )
+    registry.add_command(
+        None,
+        "delete-all-users",
+        delete_all_users_cmd,
+        help_text="Delete all Cognito users from the configured pool.",
+        policy=MUTATE_POLICY,
+    )

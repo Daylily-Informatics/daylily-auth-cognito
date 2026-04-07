@@ -13,7 +13,6 @@ from daylily_auth_cognito.admin.app_clients import (
 from daylily_auth_cognito.admin.client import CognitoAdminClient
 
 
-
 def _admin(client: mock.Mock | None = None) -> CognitoAdminClient:
     return CognitoAdminClient(
         region="us-west-2",

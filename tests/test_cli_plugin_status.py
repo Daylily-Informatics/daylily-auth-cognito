@@ -106,9 +106,10 @@ def test_status_human_active_and_unconfigured_branches(monkeypatch) -> None:
 def test_status_generic_error_exits(monkeypatch) -> None:
     runner = CliRunner()
     app = create_app(spec)
-    monkeypatch.setattr(plugin_config, "_get_admin_client", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        plugin_config, "_get_admin_client", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
 
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 1
     assert "Error: boom" in result.stdout
-

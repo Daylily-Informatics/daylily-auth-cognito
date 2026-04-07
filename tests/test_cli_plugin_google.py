@@ -29,7 +29,9 @@ def _write_yaml(path: Path, payload: dict[str, object]) -> Path:
     return path
 
 
-def test_google_client_details_resolution_covers_direct_json_config_and_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_google_client_details_resolution_covers_direct_json_config_and_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     json_path = _write_json(
         tmp_path / "google-client.json",
         {"web": {"client_id": "gid-web", "client_secret": "gsecret-web"}},
@@ -43,7 +45,10 @@ def test_google_client_details_resolution_covers_direct_json_config_and_error(mo
     monkeypatch.setattr(
         plugin_config,
         "load_config_file",
-        lambda path, require_required_keys=True: {"GOOGLE_CLIENT_ID": "gid-config", "GOOGLE_CLIENT_SECRET": "gsecret-config"},
+        lambda path, require_required_keys=True: {
+            "GOOGLE_CLIENT_ID": "gid-config",
+            "GOOGLE_CLIENT_SECRET": "gsecret-config",
+        },
     )
     monkeypatch.setattr(plugin_config, "active_config_path", lambda: tmp_path / "daycog.yaml")
     assert plugin._resolve_google_client_details(
@@ -146,13 +151,17 @@ def test_setup_with_google_sequences_setup_and_config_write(monkeypatch: pytest.
     monkeypatch.setattr(plugin, "add_google_idp", lambda **kwargs: calls.append("add-google-idp"))
     monkeypatch.setattr(plugin, "_resolve_google_client_details", lambda **kwargs: ("gid-123", "gsecret-123"))
     monkeypatch.setattr(plugin, "active_config_path", lambda: config_path)
-    monkeypatch.setattr(plugin_config, "load_config_file", lambda path, require_required_keys=True: {
-        "COGNITO_REGION": "us-west-2",
-        "COGNITO_USER_POOL_ID": "pool-123",
-        "COGNITO_APP_CLIENT_ID": "client-123",
-        "GOOGLE_CLIENT_ID": "old",
-        "GOOGLE_CLIENT_SECRET": "old",
-    })
+    monkeypatch.setattr(
+        plugin_config,
+        "load_config_file",
+        lambda path, require_required_keys=True: {
+            "COGNITO_REGION": "us-west-2",
+            "COGNITO_USER_POOL_ID": "pool-123",
+            "COGNITO_APP_CLIENT_ID": "client-123",
+            "GOOGLE_CLIENT_ID": "old",
+            "GOOGLE_CLIENT_SECRET": "old",
+        },
+    )
     monkeypatch.setattr(plugin, "_write_effective_config", lambda values: config_path)
 
     result = runner.invoke(
@@ -217,7 +226,9 @@ def test_setup_google_success_and_config_error(monkeypatch: pytest.MonkeyPatch, 
     assert "Wrote Google OAuth credentials" in result.stdout
     assert "http://localhost:9000/auth/google/callback" in result.stdout
 
-    monkeypatch.setattr(plugin, "load_config_file", lambda *args, **kwargs: (_ for _ in ()).throw(plugin.ConfigError("missing config")))
+    monkeypatch.setattr(
+        plugin, "load_config_file", lambda *args, **kwargs: (_ for _ in ()).throw(plugin.ConfigError("missing config"))
+    )
     result = runner.invoke(
         app,
         [

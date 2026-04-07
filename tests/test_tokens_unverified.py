@@ -44,16 +44,24 @@ def test_decode_jwt_unverified_returns_claims() -> None:
 
 def test_verify_jwt_claims_unverified_signature_enforces_expiration_and_audience() -> None:
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setitem(sys.modules, "jose", SimpleNamespace(jwt=_FakeJwt, JWTError=ValueError, ExpiredSignatureError=ValueError))
+        monkeypatch.setitem(
+            sys.modules, "jose", SimpleNamespace(jwt=_FakeJwt, JWTError=ValueError, ExpiredSignatureError=ValueError)
+        )
         claims = verify_jwt_claims_unverified_signature("token-123", expected_client_id="client-123")
     assert claims["client_id"] == "client-123"
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setitem(sys.modules, "jose", SimpleNamespace(jwt=_ExpiredJwt, JWTError=ValueError, ExpiredSignatureError=ValueError))
+        monkeypatch.setitem(
+            sys.modules, "jose", SimpleNamespace(jwt=_ExpiredJwt, JWTError=ValueError, ExpiredSignatureError=ValueError)
+        )
         with pytest.raises(HTTPException, match="Token has expired"):
             verify_jwt_claims_unverified_signature("token-123", expected_client_id="client-123")
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setitem(sys.modules, "jose", SimpleNamespace(jwt=_WrongAudienceJwt, JWTError=ValueError, ExpiredSignatureError=ValueError))
+        monkeypatch.setitem(
+            sys.modules,
+            "jose",
+            SimpleNamespace(jwt=_WrongAudienceJwt, JWTError=ValueError, ExpiredSignatureError=ValueError),
+        )
         with pytest.raises(HTTPException, match="Invalid token audience"):
             verify_jwt_claims_unverified_signature("token-123", expected_client_id="client-123")

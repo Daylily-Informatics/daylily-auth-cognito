@@ -119,8 +119,14 @@ def test_ensure_user_pool_domain_reuses_existing_domain_and_creates_missing_doma
     ]
     admin = _admin(cognito)
 
-    assert pools.ensure_user_pool_domain(admin, user_pool_id="pool-a", domain_prefix="alpha") == "existing.auth.us-west-2.amazoncognito.com"
-    assert pools.ensure_user_pool_domain(admin, user_pool_id="pool-a", domain_prefix="alpha") == "alpha.auth.us-west-2.amazoncognito.com"
+    assert (
+        pools.ensure_user_pool_domain(admin, user_pool_id="pool-a", domain_prefix="alpha")
+        == "existing.auth.us-west-2.amazoncognito.com"
+    )
+    assert (
+        pools.ensure_user_pool_domain(admin, user_pool_id="pool-a", domain_prefix="alpha")
+        == "alpha.auth.us-west-2.amazoncognito.com"
+    )
     cognito.create_user_pool_domain.assert_called_once_with(UserPoolId="pool-a", Domain="alpha")
 
 
@@ -151,4 +157,3 @@ def test_delete_user_pool_uses_custom_domain_and_default_delete_path() -> None:
 
     cognito.delete_user_pool_domain.assert_called_once_with(UserPoolId="pool-123", Domain="custom.domain")
     cognito.delete_user_pool.assert_called_once_with(UserPoolId="pool-123")
-

@@ -39,9 +39,7 @@ def test_merge_unique_strings_preserves_order_and_uniqueness() -> None:
 
 def test_list_find_and_describe_app_clients() -> None:
     cognito = mock.Mock()
-    cognito.list_user_pool_clients.return_value = {
-        "UserPoolClients": [{"ClientId": "client-a", "ClientName": "alpha"}]
-    }
+    cognito.list_user_pool_clients.return_value = {"UserPoolClients": [{"ClientId": "client-a", "ClientName": "alpha"}]}
     cognito.describe_user_pool_client.return_value = {
         "UserPoolClient": {
             "ClientName": "alpha",
@@ -161,4 +159,3 @@ def test_delete_app_client_accepts_client_name_lookup_and_missing_id_uses_admin_
 
     assert delete_app_client(admin, client_name="alpha") is True
     cognito.delete_user_pool_client.assert_called_once_with(UserPoolId="pool-123", ClientId="client-a")
-

@@ -146,4 +146,3 @@ def test_verify_token_maps_jwt_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(HTTPException, match="Invalid authentication token"):
         verifier.verify_token("token-123")
-

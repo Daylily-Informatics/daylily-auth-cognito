@@ -122,7 +122,10 @@ def create_app_client(
     reuse_if_exists: bool = False,
 ) -> dict[str, Any]:
     pool_id = user_pool_id or admin.require_user_pool_id()
-    existing = next((client for client in list_app_clients(admin, user_pool_id=pool_id) if client.get("ClientName") == client_name), None)
+    existing = next(
+        (client for client in list_app_clients(admin, user_pool_id=pool_id) if client.get("ClientName") == client_name),
+        None,
+    )
     if existing:
         if not reuse_if_exists:
             raise ValueError(f"App client already exists: {client_name}")

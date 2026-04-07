@@ -50,27 +50,38 @@ def list_pools(
     ccyo_out.info(f"Total: {len(pools)} pools")
 
 
-
 def setup(
     pool_name: str = typer.Option("ursa-users", "--name", "-n", help="User pool name"),
     client_name: str | None = typer.Option(None, "--client-name", help="App client name (default: <pool-name>-client)"),
-    domain_prefix: str | None = typer.Option(None, "--domain-prefix", help="Hosted UI domain prefix (default: pool name)"),
-    attach_domain: bool = typer.Option(True, "--attach-domain/--no-attach-domain", help="Attach/ensure Cognito Hosted UI domain"),
+    domain_prefix: str | None = typer.Option(
+        None, "--domain-prefix", help="Hosted UI domain prefix (default: pool name)"
+    ),
+    attach_domain: bool = typer.Option(
+        True, "--attach-domain/--no-attach-domain", help="Attach/ensure Cognito Hosted UI domain"
+    ),
     port: int = typer.Option(8001, "--port", "-p", help="Server port for callback URL"),
-    callback_path: str = typer.Option("/auth/callback", "--callback-path", help="Callback path used with --port when --callback-url is not set"),
+    callback_path: str = typer.Option(
+        "/auth/callback", "--callback-path", help="Callback path used with --port when --callback-url is not set"
+    ),
     callback_url: str | None = typer.Option(None, "--callback-url", help="Full callback URL override"),
     logout_url: str | None = typer.Option(None, "--logout-url", help="Optional logout URL for app client"),
     profile: str | None = typer.Option(None, "--profile", help="AWS profile to use"),
     region: str | None = typer.Option(None, "--region", help="AWS region to use"),
     print_exports: bool = typer.Option(False, "--print-exports", help="Print export commands for the caller shell"),
-    autoprovision: bool = typer.Option(False, "--autoprovision", help="Reuse existing app client by --client-name when present"),
+    autoprovision: bool = typer.Option(
+        False, "--autoprovision", help="Reuse existing app client by --client-name when present"
+    ),
     generate_secret: bool = typer.Option(False, "--generate-secret", help="Create app client with a secret"),
     oauth_flows: str = typer.Option("code", "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: str = typer.Option("openid,email,profile", "--scopes", help="Comma-separated OAuth scopes"),
     idps: str = typer.Option("COGNITO", "--idp", help="Comma-separated identity providers"),
     password_min_length: int = typer.Option(8, "--password-min-length", help="Minimum password length"),
-    require_uppercase: bool = typer.Option(True, "--require-uppercase/--no-require-uppercase", help="Require uppercase"),
-    require_lowercase: bool = typer.Option(True, "--require-lowercase/--no-require-lowercase", help="Require lowercase"),
+    require_uppercase: bool = typer.Option(
+        True, "--require-uppercase/--no-require-uppercase", help="Require uppercase"
+    ),
+    require_lowercase: bool = typer.Option(
+        True, "--require-lowercase/--no-require-lowercase", help="Require lowercase"
+    ),
     require_numbers: bool = typer.Option(True, "--require-numbers/--no-require-numbers", help="Require numbers"),
     require_symbols: bool = typer.Option(False, "--require-symbols/--no-require-symbols", help="Require symbols"),
     mfa: str = typer.Option("off", "--mfa", help="MFA mode: off, optional, required"),
@@ -123,7 +134,9 @@ def setup(
                 )
             resolved_cognito_domain = f"{current_domain}.auth.{resolved_region}.amazoncognito.com"
         else:
-            resolved_cognito_domain = ensure_user_pool_domain(admin, user_pool_id=pool_id, domain_prefix=resolved_domain_prefix)
+            resolved_cognito_domain = ensure_user_pool_domain(
+                admin, user_pool_id=pool_id, domain_prefix=resolved_domain_prefix
+            )
             ccyo_out.info(f"Attached hosted UI domain: {resolved_domain_prefix}")
 
     existing_client = None
@@ -179,14 +192,15 @@ def setup(
         ccyo_out.info(f'export AWS_REGION="{resolved_region}"')
 
 
-
 def delete_pool(
     pool_name: str | None = typer.Option(None, "--pool-name", help="Cognito pool name to delete"),
     pool_id: str | None = typer.Option(None, "--pool-id", help="Cognito pool ID to delete"),
     profile: str | None = typer.Option(None, "--profile", help="AWS profile to use"),
     region: str | None = typer.Option(None, "--region", help="AWS region to use"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
-    delete_domain_first: bool = typer.Option(False, "--delete-domain-first", help="Delete configured Cognito domain before deleting pool"),
+    delete_domain_first: bool = typer.Option(
+        False, "--delete-domain-first", help="Delete configured Cognito domain before deleting pool"
+    ),
 ) -> None:
     if not pool_name and not pool_id:
         ccyo_out.info("[red]x[/red] Provide one of: --pool-name or --pool-id")
@@ -204,7 +218,9 @@ def delete_pool(
         ccyo_out.info(f"[red]x[/red] {exc}")
         raise typer.Exit(1) from exc
 
-    if not force and not typer.confirm(f"Delete Cognito pool {resolved_pool['pool_name']} ({resolved_pool['pool_id']})?"):
+    if not force and not typer.confirm(
+        f"Delete Cognito pool {resolved_pool['pool_name']} ({resolved_pool['pool_id']})?"
+    ):
         ccyo_out.info("Cancelled")
         return
 
@@ -214,7 +230,6 @@ def delete_pool(
         delete_domain_first=delete_domain_first,
     )
     ccyo_out.info(f"Deleted Cognito pool: {resolved_pool['pool_name']} ({resolved_pool['pool_id']})")
-
 
 
 def teardown(
@@ -229,7 +244,6 @@ def teardown(
     delete_pool(pool_name=pool_name, pool_id=pool_id, force=force)
 
 
-
 def fix_auth_flows() -> None:
     admin, _runtime = _get_admin_client(require_profile=True)
     admin.user_pool_id = _get_pool_id()
@@ -238,11 +252,22 @@ def fix_auth_flows() -> None:
     ccyo_out.info(f"Enabled auth flows on app client {update_kwargs['ClientId']}")
 
 
-
 def register(registry: CommandRegistry, spec: CliSpec | None = None) -> None:
     del spec
-    registry.add_command(None, "setup", setup, help_text="Create Cognito User Pool and App Client.", policy=MUTATE_POLICY)
+    registry.add_command(
+        None, "setup", setup, help_text="Create Cognito User Pool and App Client.", policy=MUTATE_POLICY
+    )
     registry.add_command(None, "list-pools", list_pools, help_text="List Cognito user pools.", policy=READ_POLICY)
-    registry.add_command(None, "delete-pool", delete_pool, help_text="Delete a Cognito user pool.", policy=MUTATE_POLICY)
-    registry.add_command(None, "teardown", teardown, help_text="Delete the configured Cognito user pool.", policy=MUTATE_POLICY)
-    registry.add_command(None, "fix-auth-flows", fix_auth_flows, help_text="Enable required auth flows on the app client.", policy=MUTATE_POLICY)
+    registry.add_command(
+        None, "delete-pool", delete_pool, help_text="Delete a Cognito user pool.", policy=MUTATE_POLICY
+    )
+    registry.add_command(
+        None, "teardown", teardown, help_text="Delete the configured Cognito user pool.", policy=MUTATE_POLICY
+    )
+    registry.add_command(
+        None,
+        "fix-auth-flows",
+        fix_auth_flows,
+        help_text="Enable required auth flows on the app client.",
+        policy=MUTATE_POLICY,
+    )

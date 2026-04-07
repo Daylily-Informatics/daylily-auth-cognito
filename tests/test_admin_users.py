@@ -68,7 +68,10 @@ def test_list_and_customer_users_apply_filters_and_limits() -> None:
     cognito.get_paginator.return_value = paginator
     admin = _admin(cognito)
 
-    assert users.list_users(admin, limit=2, filter_expression='email = "user@example.test"') == [{"Username": "u1"}, {"Username": "u2"}]
+    assert users.list_users(admin, limit=2, filter_expression='email = "user@example.test"') == [
+        {"Username": "u1"},
+        {"Username": "u2"},
+    ]
     assert users.list_customer_users(admin, "cust-99") == [{"Username": "u1"}, {"Username": "u2"}]
     first_call = paginator.paginate.call_args_list[0].kwargs
     second_call = paginator.paginate.call_args_list[1].kwargs

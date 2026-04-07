@@ -15,7 +15,6 @@ from daylily_auth_cognito.cli.plugins import status as status_plugin
 from daylily_auth_cognito.cli.spec import spec
 
 
-
 def _write_config(path: Path) -> Path:
     path.write_text(
         yaml.safe_dump(
@@ -63,9 +62,7 @@ def test_status_json_reports_pool_state(monkeypatch) -> None:
     app = create_app(spec)
 
     fake_admin = SimpleNamespace(
-        cognito=SimpleNamespace(
-            describe_user_pool=lambda UserPoolId: {"UserPool": {"Name": "ursa-users"}}
-        )
+        cognito=SimpleNamespace(describe_user_pool=lambda UserPoolId: {"UserPool": {"Name": "ursa-users"}})
     )
     fake_runtime = SimpleNamespace(
         path=Path("/tmp/daycog.yaml"),

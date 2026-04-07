@@ -168,7 +168,9 @@ def test_edit_and_remove_app_validate_and_delegate(monkeypatch: pytest.MonkeyPat
     _patch_admin(monkeypatch, admin, runtime)
     messages = _capture_messages(monkeypatch)
     monkeypatch.setattr(apps_plugin, "find_user_pool_id_by_name", lambda current_admin, pool_name: "pool-123")
-    monkeypatch.setattr(apps_plugin, "find_app_client", lambda *args, **kwargs: {"client_id": "client-123", "client_name": "web-client"})
+    monkeypatch.setattr(
+        apps_plugin, "find_app_client", lambda *args, **kwargs: {"client_id": "client-123", "client_name": "web-client"}
+    )
     update_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         apps_plugin,
