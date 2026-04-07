@@ -309,6 +309,8 @@ def _get_admin_client(
         region=runtime.aws_region,
         aws_profile=runtime.aws_profile,
     )
+    admin.user_pool_id = runtime.values.get("COGNITO_USER_POOL_ID") or admin.user_pool_id
+    admin.app_client_id = runtime.values.get("COGNITO_APP_CLIENT_ID") or admin.app_client_id
     return admin, runtime
 
 
