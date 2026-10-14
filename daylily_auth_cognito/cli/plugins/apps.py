@@ -48,6 +48,9 @@ def add_app(
     oauth_flows: str = typer.Option("code", "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: str = typer.Option("openid,email,profile", "--scopes", help="Comma-separated OAuth scopes"),
     idps: str = typer.Option("COGNITO", "--idp", help="Comma-separated identity providers"),
+    read_attributes: str | None = typer.Option(
+        None, "--read-attributes", help="Comma-separated readable attributes for this pool"
+    ),
     explicit_auth_flows: str | None = typer.Option(
         None, "--explicit-auth-flows", help="Comma-separated explicit authentication flows"
     ),
@@ -62,6 +65,9 @@ def add_app(
     flows = _parse_csv(explicit_auth_flows) if explicit_auth_flows is not None else None
     if flows == []:
         raise typer.BadParameter("--explicit-auth-flows must not be empty")
+    readable = _parse_csv(read_attributes) if read_attributes is not None else None
+    if readable == []:
+        raise typer.BadParameter("--read-attributes must not be empty")
     try:
         client = create_app_client(
             admin,
@@ -74,6 +80,7 @@ def add_app(
             callback_urls=[callback_url],
             logout_urls=[logout_url] if logout_url else [],
             supported_identity_providers=_parse_csv(idps),
+            read_attributes=readable,
             reuse_if_exists=False,
         )
     except ValueError as exc:
@@ -128,6 +135,9 @@ def edit_app(
     oauth_flows: str | None = typer.Option(None, "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: str | None = typer.Option(None, "--scopes", help="Comma-separated OAuth scopes"),
     idps: str | None = typer.Option(None, "--idp", help="Comma-separated identity providers"),
+    read_attributes: str | None = typer.Option(
+        None, "--read-attributes", help="Comma-separated readable attributes for this pool"
+    ),
     explicit_auth_flows: str | None = typer.Option(
         None, "--explicit-auth-flows", help="Comma-separated explicit authentication flows"
     ),
@@ -155,6 +165,11 @@ def edit_app(
             overrides["AllowedOAuthScopes"] = _parse_csv(scopes)
         if idps:
             overrides["SupportedIdentityProviders"] = _parse_csv(idps)
+        if read_attributes is not None:
+            readable = _parse_csv(read_attributes)
+            if not readable:
+                raise typer.BadParameter("--read-attributes must not be empty")
+            overrides["ReadAttributes"] = readable
         if explicit_auth_flows is not None:
             flows = _parse_csv(explicit_auth_flows)
             if not flows:
