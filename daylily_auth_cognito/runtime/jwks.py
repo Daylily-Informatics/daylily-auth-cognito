@@ -138,6 +138,7 @@ def verify_token_with_jwks(
     cache: Optional[JWKSCache] = None,
     *,
     audience: str | None = None,
+    access_token: str | None = None,
 ) -> dict[str, Any]:
     """Verify a JWT token using JWKS from Cognito.
 
@@ -197,6 +198,7 @@ def verify_token_with_jwks(
         },
         issuer=issuer,
         audience=audience,
+        access_token=access_token,
     )
 
     return claims

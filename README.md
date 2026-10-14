@@ -84,6 +84,8 @@ Hosted UI callbacks exchange the authorization code asynchronously in the web pa
 
 Set `CognitoWebSessionConfig.identity_provider="Google"` to select Google explicitly at the Cognito authorize endpoint. The app client must separately restrict its supported providers and password authentication flows. A callback principal resolver can use `CognitoTokenVerifier.verify_id_token(token)` to require the pool signature/issuer, exact client audience, ID token use, subject and expiry. This method always verifies the signature.
 
+Pass the access token from the same code exchange as `verify_id_token(id_token, access_token=access_token)`. ID tokens that contain `at_hash` require this pair so the JWT library can verify its hash. Neither token is stored in the browser session.
+
 ## CLI
 
 Activate the repo, then use `daycog`:
