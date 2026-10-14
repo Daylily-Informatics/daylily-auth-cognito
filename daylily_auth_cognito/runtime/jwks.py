@@ -136,6 +136,8 @@ def verify_token_with_jwks(
     region: str,
     user_pool_id: str,
     cache: Optional[JWKSCache] = None,
+    *,
+    audience: str | None = None,
 ) -> dict[str, Any]:
     """Verify a JWT token using JWKS from Cognito.
 
@@ -191,8 +193,10 @@ def verify_token_with_jwks(
             "verify_signature": True,
             "verify_exp": True,
             "verify_iss": True,
+            "verify_aud": audience is not None,
         },
         issuer=issuer,
+        audience=audience,
     )
 
     return claims

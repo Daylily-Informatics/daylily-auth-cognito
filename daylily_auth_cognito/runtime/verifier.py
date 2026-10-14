@@ -39,6 +39,33 @@ class CognitoTokenVerifier:
         if self.cache is None:
             self.cache = JWKSCache(self.region, self.user_pool_id)
 
+    def verify_id_token(self, token: str) -> dict[str, Any]:
+        """Verify an ID token for this exact pool and app client."""
+        if jwt is None:
+            raise ImportError("python-jose is required for JWT verification")
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="ID token is required")
+        try:
+            claims = verify_token_with_jwks(
+                token, self.region, self.user_pool_id, cache=self.cache, audience=self.app_client_id
+            )
+            if (
+                claims.get("token_use") != "id"
+                or claims.get("aud") != self.app_client_id
+                or not claims.get("sub")
+            ):
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid ID token")
+            expiration = claims.get("exp")
+            if not isinstance(expiration, (int, float)) or expiration <= time.time():
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid ID token expiry")
+            return claims
+        except HTTPException:
+            raise
+        except (KeyError, RuntimeError, JWTError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid ID token"
+            ) from exc
+
     def verify_token(self, token: str, *, verify_signature: bool = True) -> dict[str, Any]:
         if jwt is None:
             raise ImportError(

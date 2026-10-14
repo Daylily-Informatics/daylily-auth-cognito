@@ -83,6 +83,7 @@ class CognitoWebSessionConfig:
     next_path_session_key: str = NEXT_PATH_SESSION_KEY
     error_redirect_path: str = DEFAULT_ERROR_REDIRECT_PATH
     server_instance_id: str | None = None
+    identity_provider: str | None = None
 
     def __post_init__(self) -> None:
         _normalize_domain(self.domain)
@@ -222,6 +223,7 @@ def start_cognito_login(
         state=state,
         code_challenge=config.code_challenge,
         code_challenge_method=config.code_challenge_method,
+        identity_provider=config.identity_provider,
     )
     return RedirectResponse(url=login_url, status_code=302)
 

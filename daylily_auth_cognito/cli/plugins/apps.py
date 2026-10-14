@@ -48,6 +48,9 @@ def add_app(
     oauth_flows: str = typer.Option("code", "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: str = typer.Option("openid,email,profile", "--scopes", help="Comma-separated OAuth scopes"),
     idps: str = typer.Option("COGNITO", "--idp", help="Comma-separated identity providers"),
+    explicit_auth_flows: str | None = typer.Option(
+        None, "--explicit-auth-flows", help="Comma-separated explicit authentication flows"
+    ),
     set_default: bool = typer.Option(
         False, "--set-default", help="Print a reminder to refresh the auth config file to this app"
     ),
@@ -56,12 +59,16 @@ def add_app(
         profile=profile, region=region, require_config=False, require_required_keys=False, require_profile=True
     )
     pool_id = find_user_pool_id_by_name(admin, pool_name)
+    flows = _parse_csv(explicit_auth_flows) if explicit_auth_flows is not None else None
+    if flows == []:
+        raise typer.BadParameter("--explicit-auth-flows must not be empty")
     try:
         client = create_app_client(
             admin,
             client_name=app_name,
             user_pool_id=pool_id,
             generate_secret=generate_secret,
+            explicit_auth_flows=flows,
             allowed_oauth_flows=_parse_csv(oauth_flows),
             allowed_oauth_scopes=_parse_csv(scopes),
             callback_urls=[callback_url],
@@ -121,6 +128,9 @@ def edit_app(
     oauth_flows: str | None = typer.Option(None, "--oauth-flows", help="Comma-separated OAuth flows"),
     scopes: str | None = typer.Option(None, "--scopes", help="Comma-separated OAuth scopes"),
     idps: str | None = typer.Option(None, "--idp", help="Comma-separated identity providers"),
+    explicit_auth_flows: str | None = typer.Option(
+        None, "--explicit-auth-flows", help="Comma-separated explicit authentication flows"
+    ),
     set_default: bool = typer.Option(
         False, "--set-default", help="Print a reminder to refresh the auth config file to this app"
     ),
@@ -145,6 +155,11 @@ def edit_app(
             overrides["AllowedOAuthScopes"] = _parse_csv(scopes)
         if idps:
             overrides["SupportedIdentityProviders"] = _parse_csv(idps)
+        if explicit_auth_flows is not None:
+            flows = _parse_csv(explicit_auth_flows)
+            if not flows:
+                raise typer.BadParameter("--explicit-auth-flows must not be empty")
+            overrides["ExplicitAuthFlows"] = flows
         update_app_client(admin, client_id=found["client_id"], user_pool_id=pool_id, overrides=overrides)
     except ValueError as exc:
         ccyo_out.info(f"[red]x[/red] {exc}")
