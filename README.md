@@ -82,6 +82,10 @@ configure_session_middleware(app, config)
 
 Hosted UI callbacks exchange the authorization code asynchronously in the web path and only persist normalized principal data in the session. Raw OAuth tokens are rejected.
 
+Set `CognitoWebSessionConfig.identity_provider="Google"` to select Google explicitly at the Cognito authorize endpoint. The app client must separately restrict its supported providers and password authentication flows. A callback principal resolver can use `CognitoTokenVerifier.verify_id_token(token)` to require the pool signature/issuer, exact client audience, ID token use, subject and expiry. This method always verifies the signature.
+
+Pass the access token from the same code exchange as `verify_id_token(id_token, access_token=access_token)`. ID tokens that contain `at_hash` require this pair so the JWT library can verify its hash. Neither token is stored in the browser session.
+
 ## CLI
 
 Activate the repo, then use `daycog`:
@@ -95,6 +99,10 @@ daycog setup --help
 ```
 
 CLI config remains at `~/.config/daycog/config.yaml`.
+
+`daycog add-app` and `daycog edit-app` accept `--explicit-auth-flows` as a nonempty comma-separated list. A Google-only OAuth client uses `--idp Google --oauth-flows code --generate-secret --explicit-auth-flows ALLOW_REFRESH_TOKEN_AUTH`; restricting displayed providers alone does not disable SDK password authentication. Existing defaults remain unchanged when the explicit-auth-flows option is omitted.
+
+Use `--read-attributes email,email_verified` for a pool whose Google mapping exposes those standard fields. This selects readable attributes explicitly and avoids the admin helper's historical custom-attribute default, which is invalid for pools without that attribute.
 
 The flat-file config model is implemented in `daylily_auth_cognito.cli.config`; its internal config helper is not part of the runtime surface.
 

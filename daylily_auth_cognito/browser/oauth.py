@@ -33,6 +33,7 @@ def build_authorization_url(
     state: str | None = None,
     code_challenge: str | None = None,
     code_challenge_method: str | None = None,
+    identity_provider: str | None = None,
 ) -> str:
     params = {
         "client_id": client_id,
@@ -46,6 +47,10 @@ def build_authorization_url(
         params["code_challenge"] = code_challenge
     if code_challenge_method:
         params["code_challenge_method"] = code_challenge_method
+    if identity_provider is not None:
+        if not identity_provider or identity_provider != identity_provider.strip():
+            raise ValueError("identity_provider must be a non-empty provider name")
+        params["identity_provider"] = identity_provider
     query = urllib.parse.urlencode(params)
     return f"https://{_normalize_domain(domain)}/oauth2/authorize?{query}"
 
